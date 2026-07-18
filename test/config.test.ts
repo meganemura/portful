@@ -66,7 +66,7 @@ test('config: missing file throws a helpful error with sample TOML', async () =>
         () => loadConfig(),
         (err: Error) => {
           assert.match(err.message, /config\.toml/);
-          assert.match(err.message, /\[repos\.b\]/);
+          assert.match(err.message, /\[repos\.api\]/);
           return true;
         }
       );

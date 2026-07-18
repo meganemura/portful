@@ -14,8 +14,8 @@ export interface Config {
   repos: Record<string, RepoConfig>;
 }
 
-const SAMPLE_CONFIG = `[repos.b]
-path = "~/work/b"
+const SAMPLE_CONFIG = `[repos.api]
+path = "~/work/api"
 fixed_port = 3000
 port_range = [3101, 3199]
 serve = "bundle exec rails s -p {port}"
