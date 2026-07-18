@@ -161,10 +161,24 @@ await yargs(hideBin(process.argv))
     }
     return [];
   })
-  .demandCommand(1)
+  .demandCommand(1, 'Please specify a command.')
   .strictCommands()
-  .fail((msg, err) => {
-    reportError(err ?? new Error(msg));
+  .fail((msg, err, yargsInstance) => {
+    if (err) {
+      // A real thrown Error (not a yargs parsing/validation failure). Every
+      // command handler already catches and reports its own errors via
+      // handle(), so this only fires for errors thrown outside that path
+      // (e.g. during argument coercion).
+      reportError(err);
+      return;
+    }
+    // yargs' own validation failure (no command, unknown command, bad
+    // option, ...). A custom .fail() handler replaces yargs' default
+    // behavior entirely, including the help text it would otherwise print,
+    // so show it back here rather than leaving the user with just `msg`.
+    yargsInstance.showHelp();
+    console.error(`\n${msg}`);
+    process.exitCode = 1;
   })
   .help()
   .parse();
