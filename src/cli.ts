@@ -40,21 +40,34 @@ function reportError(err: unknown): void {
 }
 
 /**
- * Words already typed on the command line at completion time, excluding the
- * script name and the in-progress word being completed. Computed directly
- * from `process.argv` rather than the `argv` yargs hands to the completion
- * function: that `argv` comes from an internal re-parse whose positional
- * array shape depends on whether a command matched, which is unreliable to
- * introspect.
+ * Words already typed on the command line at completion time, plus the
+ * in-progress word being completed. Computed directly from `process.argv`
+ * rather than the `argv`/`current` yargs hands to the completion function:
+ * that `argv` comes from an internal re-parse whose positional array shape
+ * depends on whether a command matched, which is unreliable to introspect.
+ *
+ * `COMP_CWORD` (exported by both the zsh and bash completion scripts as a
+ * 0-based index into the full word array, where index 0 is the script name)
+ * is the authoritative way to find the in-progress word: zsh's completion
+ * script does not pass a trailing empty element for it the way bash's does,
+ * so assuming "last element = current word" silently breaks under zsh.
  */
-function completionPositionals(): string[] {
+function completionContext(): { positionals: string[]; current: string } {
   const args = hideBin(process.argv);
   const idx = args.indexOf('--get-yargs-completions');
   if (idx === -1) {
-    return [];
+    return { positionals: [], current: '' };
   }
-  const rest = args.slice(idx + 1); // [scriptName, ...typed words, currentWord]
-  return rest.slice(1, -1);
+  const rest = args.slice(idx + 1); // rest[0] is the script name.
+
+  const cword = Number.parseInt(process.env.COMP_CWORD ?? '', 10);
+  if (Number.isInteger(cword) && cword >= 1) {
+    return { positionals: rest.slice(1, cword), current: rest[cword] ?? '' };
+  }
+
+  // Fallback if COMP_CWORD is unavailable: assume the last word is the one
+  // being completed (holds for bash-style invocations).
+  return { positionals: rest.slice(1, -1), current: rest.length > 0 ? rest[rest.length - 1] : '' };
 }
 
 // yargs internally re-parses the completion args to build the `argv` object
@@ -139,8 +152,8 @@ await yargs(hideBin(process.argv))
       await proxyCommand({ repo: argv.repo as string | undefined });
     })
   )
-  .completion('completion', 'Generate a shell completion script', async (current) => {
-    const positionals = completionPositionals();
+  .completion('completion', 'Generate a shell completion script', async () => {
+    const { positionals, current } = completionContext();
     if (positionals.length === 0) {
       return ['use', 'serve', 'run', 'status', 'stop', 'proxy'];
     }
