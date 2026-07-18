@@ -28,8 +28,14 @@ export interface RepoState {
   proxy?: ProxyEntry;
 }
 
+/** A named preset bundling one worktree per member repo, switched together via `task use`. */
+export interface TaskDefinition {
+  members: Record<string, string>;
+}
+
 export interface State {
   repos: Record<string, RepoState>;
+  tasks: Record<string, TaskDefinition>;
 }
 
 export function getStatePath(): string {
@@ -38,7 +44,7 @@ export function getStatePath(): string {
 }
 
 function emptyState(): State {
-  return { repos: {} };
+  return { repos: {}, tasks: {} };
 }
 
 export function ensureRepoState(state: State, repo: string): RepoState {
@@ -97,6 +103,9 @@ export async function readState(): Promise<State> {
   const parsed = JSON.parse(raw) as State;
   if (!parsed.repos) {
     parsed.repos = {};
+  }
+  if (!parsed.tasks) {
+    parsed.tasks = {};
   }
   return cleanupDeadEntries(parsed);
 }

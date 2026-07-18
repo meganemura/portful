@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { withState } from '../src/state.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -41,12 +42,20 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
 }
 
 /** Runs `wtshunt --get-yargs-completions ...` and returns the suggested completions, one per line. */
-async function getCompletions(configDir: string, args: string[], compCword?: number): Promise<string[]> {
+async function getCompletions(
+  configDir: string,
+  args: string[],
+  compCword?: number,
+  stateDir?: string
+): Promise<string[]> {
   const env: NodeJS.ProcessEnv = { ...process.env, XDG_CONFIG_HOME: configDir };
   if (compCword !== undefined) {
     env.COMP_CWORD = String(compCword);
   } else {
     delete env.COMP_CWORD;
+  }
+  if (stateDir !== undefined) {
+    env.XDG_STATE_HOME = stateDir;
   }
 
   const { stdout } = await execFileAsync(
@@ -55,6 +64,27 @@ async function getCompletions(configDir: string, args: string[], compCword?: num
     { env }
   );
   return stdout.split('\n').filter((line) => line.length > 0);
+}
+
+/** Seeds state.json (under a fresh tmp XDG_STATE_HOME) with the given task names, returning that dir. */
+async function makeStateDirWithTasks(taskNames: string[]): Promise<string> {
+  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-completion-state-'));
+  const original = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = stateDir;
+  try {
+    await withState((state) => {
+      for (const name of taskNames) {
+        state.tasks[name] = { members: {} };
+      }
+    });
+  } finally {
+    if (original === undefined) {
+      delete process.env.XDG_STATE_HOME;
+    } else {
+      process.env.XDG_STATE_HOME = original;
+    }
+  }
+  return stateDir;
 }
 
 test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', async () => {
@@ -69,6 +99,7 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'status',
       'stop',
       'proxy',
+      'task',
       'help',
       'completion',
     ]);
@@ -95,7 +126,7 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
     // "wtshunt <Tab>": rest = [wtshunt, ''] (bash always appends the current
     // word, empty or not), COMP_CWORD=1 points at that empty element.
     const topLevel = await getCompletions(configDir, [''], 1);
-    assert.deepEqual(topLevel, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'help', 'completion']);
+    assert.deepEqual(topLevel, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'help', 'completion']);
 
     // "wtshunt use <Tab>": rest = [wtshunt, use, ''], COMP_CWORD=2.
     const afterUse = await getCompletions(configDir, ['use', ''], 2);
@@ -194,7 +225,53 @@ test('completion: after "help", suggests command names (excluding help itself)',
   const { base, configDir } = await makeRepoFixture();
   try {
     const afterHelp = await getCompletions(configDir, ['help'], 2);
-    assert.deepEqual(afterHelp, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'completion']);
+    assert.deepEqual(afterHelp, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'completion']);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: after "task", suggests its subcommands', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    const afterTask = await getCompletions(configDir, ['task'], 2);
+    assert.deepEqual(afterTask, ['add', 'use', 'list', 'rm']);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: "task use"/"task rm" suggest defined task names', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  const stateDir = await makeStateDirWithTasks(['prod', 'staging']);
+  try {
+    const afterUse = await getCompletions(configDir, ['task', 'use'], 3, stateDir);
+    assert.deepEqual(afterUse.sort(), ['prod', 'staging'].sort());
+
+    const afterRm = await getCompletions(configDir, ['task', 'rm'], 3, stateDir);
+    assert.deepEqual(afterRm.sort(), ['prod', 'staging'].sort());
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: "task add <name>" has no fixed candidates, but the next argument onward does', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    // Position 2 is the new task's own name: nothing to suggest.
+    const nameArg = await getCompletions(configDir, ['task', 'add'], 3);
+    assert.deepEqual(nameArg, []);
+
+    // Position 3 onward are repo/worktree members, same as elsewhere.
+    const memberArg = await getCompletions(configDir, ['task', 'add', 'myname'], 4);
+    assert.deepEqual(memberArg.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
+
+    const secondMemberArg = await getCompletions(configDir, ['task', 'add', 'myname', 'b/main'], 5);
+    assert.deepEqual(secondMemberArg.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });

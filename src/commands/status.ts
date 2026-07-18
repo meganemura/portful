@@ -1,5 +1,6 @@
 import { loadConfig } from '../config.ts';
 import { readState } from '../state.ts';
+import { taskMatchesCurrentActive } from '../tasks.ts';
 
 export async function statusCommand(): Promise<void> {
   const config = await loadConfig();
@@ -37,5 +38,20 @@ export async function statusCommand(): Promise<void> {
     }
 
     console.log('');
+  }
+
+  const taskNames = Object.keys(state.tasks);
+  if (taskNames.length === 0) {
+    console.log('Tasks: (none defined)');
+  } else {
+    console.log('Tasks:');
+    for (const name of taskNames) {
+      const task = state.tasks[name];
+      const marker = taskMatchesCurrentActive(state, task) ? ' *' : '';
+      const memberList = Object.entries(task.members)
+        .map(([repo, wt]) => `${repo}/${wt}`)
+        .join(', ');
+      console.log(`  ${name}${marker}\t${memberList}`);
+    }
   }
 }

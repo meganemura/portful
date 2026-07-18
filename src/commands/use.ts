@@ -1,8 +1,5 @@
-import { access, constants } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline/promises';
-import { delimiter, join } from 'node:path';
 import { loadConfig } from '../config.ts';
+import { pickOne } from '../picker.ts';
 import { findWorktree, listWorktrees, parseRepoArg, resolveRepoFromCwd, type WorktreeInfo } from '../repo.ts';
 import { ensureRepoState, readState, withState } from '../state.ts';
 
@@ -48,9 +45,11 @@ export async function useCommand(args: UseArgs): Promise<void> {
   const state = await readState();
   const ports = state.repos[repoName]?.ports ?? {};
 
-  const chosen = (await isPecoAvailable())
-    ? await selectWithPeco(worktrees, ports)
-    : await selectByNumber(worktrees, ports);
+  const chosenName = await pickOne(
+    worktrees.map((wt) => ({ columns: [wt.name, wt.branch, String(ports[wt.name] ?? '-')] })),
+    'Select worktree: '
+  );
+  const chosen = chosenName !== undefined ? findWorktree(worktrees, chosenName) : undefined;
 
   if (!chosen) {
     console.log('No worktree selected.');
@@ -82,79 +81,4 @@ async function setActiveAndReport(repoName: string, worktree: WorktreeInfo): Pro
   if (result.proxyActive) {
     console.log(`proxy now routes to ${worktree.name}`);
   }
-}
-
-async function isPecoAvailable(): Promise<boolean> {
-  const pathEnv = process.env.PATH ?? '';
-  for (const dir of pathEnv.split(delimiter)) {
-    if (!dir) {
-      continue;
-    }
-    try {
-      await access(join(dir, 'peco'), constants.X_OK);
-      return true;
-    } catch {
-      continue;
-    }
-  }
-  return false;
-}
-
-function pecoLines(worktrees: WorktreeInfo[], ports: Record<string, number>): string[] {
-  return worktrees.map((wt) => `${wt.name}\t${wt.branch}\t${ports[wt.name] ?? '-'}`);
-}
-
-function runPeco(lines: string[]): Promise<string | undefined> {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn('peco', [], { stdio: ['pipe', 'pipe', 'inherit'] });
-    let output = '';
-    child.stdout.on('data', (chunk: Buffer) => {
-      output += chunk.toString();
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0 || !output.trim()) {
-        resolvePromise(undefined);
-        return;
-      }
-      resolvePromise(output.trim());
-    });
-    child.stdin.write(lines.join('\n') + '\n');
-    child.stdin.end();
-  });
-}
-
-async function selectWithPeco(
-  worktrees: WorktreeInfo[],
-  ports: Record<string, number>
-): Promise<WorktreeInfo | undefined> {
-  const selectedLine = await runPeco(pecoLines(worktrees, ports));
-  if (!selectedLine) {
-    return undefined;
-  }
-  const name = selectedLine.split('\t')[0];
-  return findWorktree(worktrees, name);
-}
-
-async function selectByNumber(
-  worktrees: WorktreeInfo[],
-  ports: Record<string, number>
-): Promise<WorktreeInfo | undefined> {
-  worktrees.forEach((wt, i) => {
-    console.log(`${i + 1}) ${wt.name}\t${wt.branch}\t${ports[wt.name] ?? '-'}`);
-  });
-
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  let answer: string;
-  try {
-    answer = await rl.question('Select worktree: ');
-  } finally {
-    rl.close();
-  }
-
-  const index = Number.parseInt(answer, 10) - 1;
-  if (Number.isNaN(index) || index < 0 || index >= worktrees.length) {
-    return undefined;
-  }
-  return worktrees[index];
 }

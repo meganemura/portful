@@ -2,12 +2,14 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { loadConfig } from './config.ts';
 import { listWorktrees } from './repo.ts';
+import { readState } from './state.ts';
 import { serveCommand } from './commands/serve.ts';
 import { runCommand } from './commands/run.ts';
 import { useCommand } from './commands/use.ts';
 import { statusCommand } from './commands/status.ts';
 import { stopCommand } from './commands/stop.ts';
 import { proxyCommand } from './commands/proxy.ts';
+import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from './commands/task.ts';
 
 /**
  * Flat list of every repo name plus every `repo/worktree` name across all
@@ -38,6 +40,16 @@ async function repoAndWorktreeNames(): Promise<string[]> {
   );
 
   return perRepo.flat();
+}
+
+/** Task names currently defined in state, or [] if state can't be read. */
+async function taskNamesForCompletion(): Promise<string[]> {
+  try {
+    const state = await readState();
+    return Object.keys(state.tasks);
+  } catch {
+    return [];
+  }
 }
 
 function reportError(err: unknown): void {
@@ -187,10 +199,12 @@ const repoPositional = (y: Argv) =>
     describe: 'repo, or repo/worktree to target directly',
   });
 
-const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'help', 'completion'];
+const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'help', 'completion'];
 
 /** Commands whose first argument is a `repo` or `repo/worktree` name. */
 const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'proxy', 'run']);
+
+const TASK_SUBCOMMANDS = ['add', 'use', 'list', 'rm'];
 
 // Extracted so `help` can build a second, independent yargs instance and
 // re-parse `[command, '--help']` (or just `['--help']`) through it (see the
@@ -263,6 +277,56 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       })
     )
     .command(
+      'task',
+      'Manage named presets bundling one worktree per repo (task add/use/list/rm)',
+      (y) =>
+        y
+          .command(
+            'add <name> [members..]',
+            'Create a task from repo/worktree pairs, prompting for any repo left out',
+            (yy) =>
+              yy
+                .positional('name', { type: 'string', describe: 'task name' })
+                .positional('members', {
+                  type: 'string',
+                  array: true,
+                  describe: 'repo/worktree pairs to include explicitly',
+                }),
+            handle(async (argv) => {
+              await taskAddCommand({
+                name: argv.name as string,
+                members: (argv.members as string[] | undefined) ?? [],
+              });
+            })
+          )
+          .command(
+            'use <name>',
+            "Switch every member repo's active worktree to this task's",
+            (yy) => yy.positional('name', { type: 'string', describe: 'task name' }),
+            handle(async (argv) => {
+              await taskUseCommand({ name: argv.name as string });
+            })
+          )
+          .command(
+            'list',
+            'List defined tasks',
+            () => {},
+            handle(async () => {
+              await taskListCommand();
+            })
+          )
+          .command(
+            'rm <name>',
+            'Remove a task',
+            (yy) => yy.positional('name', { type: 'string', describe: 'task name' }),
+            handle(async (argv) => {
+              await taskRmCommand({ name: argv.name as string });
+            })
+          )
+          .demandCommand(1, 'Specify a task subcommand: add, use, list, or rm.'),
+      () => {}
+    )
+    .command(
       'help [command]',
       'Show help, optionally for a specific command',
       (y) => y.positional('command', { type: 'string', describe: 'command to show help for' }),
@@ -330,6 +394,28 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       if (positionals.length === 1 && REPO_ARG_COMMANDS.has(command)) {
         const names = await repoAndWorktreeNames();
         return names.filter(startsWithCurrent);
+      }
+
+      if (command === 'task') {
+        if (positionals.length === 1) {
+          return TASK_SUBCOMMANDS.filter(startsWithCurrent);
+        }
+
+        const subcommand = positionals[1];
+
+        if (positionals.length === 2 && (subcommand === 'use' || subcommand === 'rm')) {
+          const names = await taskNamesForCompletion();
+          return names.filter(startsWithCurrent);
+        }
+
+        if (positionals.length >= 3 && subcommand === 'add') {
+          // Position 2 is the new task's name (no fixed candidates); every
+          // position from 3 onward is a repo/worktree member.
+          const names = await repoAndWorktreeNames();
+          return names.filter(startsWithCurrent);
+        }
+
+        return [];
       }
 
       // Second argument onward, for every command (e.g. `run b bin/<Tab>`).
