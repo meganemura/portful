@@ -22,7 +22,6 @@ exists for.
 - Run one-off commands inside a worktree without `cd`-ing there: `wtshunt run`
 - Flip which worktree the proxy points at: `wtshunt use`
 - See what's running across every worktree: `wtshunt status`
-- Switch a whole group of related repos' worktrees together: `wtshunt task`
 
 ## When you don't need this
 
@@ -186,74 +185,15 @@ occupying it (via `lsof`) and exits. WebSocket and other Upgrade
 requests are forwarded too — see Limitations for how that interacts
 with `use`.
 
-### `wtshunt task add|use|list|rm`
+### `wtshunt task ...`
 
-Manages named presets — "tasks" — that bundle one worktree per repo, so
-a whole related group of repos can switch together in one command. See
-Tasks below for the full workflow.
-
-- `wtshunt task add <name> [repo/worktree ...]` creates a task. Repos
-  named explicitly use the given worktree; every other registered repo
-  gets prompted for (peco, or a numbered picker, with a leading option
-  to leave that repo out of the task entirely).
-- `wtshunt task use <name>` validates every member's worktree still
-  exists — if even one doesn't, nothing is applied — then switches all
-  of them at once. Reports which members have no server running yet,
-  and warns about any already-running server whose `{port:<repo>}`
-  wiring no longer matches (see Tasks).
-- `wtshunt task list` lists tasks and their members, marking with `*`
-  any task whose members all match the current active worktrees.
-- `wtshunt task rm <name>` removes a task.
+Experimental multi-repo presets — see
+[Tasks (experimental)](#tasks-experimental) below.
 
 ### `wtshunt help [command]`
 
 Shows the same thing as `wtshunt --help`; with a command name, shows that
 command's own help (equivalent to `wtshunt <command> --help`).
-
-## Tasks
-
-A single repo's worktrees only get you so far once a change spans more
-than one repo — say, an `api` branch and the `front` branch that talks
-to it. A **task** is a named preset that bundles one worktree per repo,
-so the whole group switches together:
-
-```sh
-wtshunt task add feature-x api/feature-x front/feature-x
-wtshunt task use feature-x
-```
-
-`task add` with no repo named explicitly prompts for each one (or lets
-you leave it out of the task); `task use` applies every member's active
-worktree in a single step, then reports which members still need
-`wtshunt serve` and whether any repo's proxy needs nothing further (it
-just re-reads state on the next request, as always).
-
-**How repos actually stay wired together.** The fixed-port proxy in
-front of a service re-reads `state.json` on every request, so *that*
-part always reflects whichever worktree is currently active — no
-restart needed. A `serve` template's `{port:<repo>}` reference is
-different: it's substituted once, into the literal shell command run
-when that server starts, so it's fixed for as long as that process
-keeps running. Switching `api`'s active worktree doesn't retroactively
-change what an already-running `front` process is connected to — it
-keeps talking to `api`'s old port until you restart it. This is exactly
-what `task use` checks for: if a server is still running with
-`{port:<repo>}` wiring that no longer matches, it prints a warning
-telling you to `wtshunt stop <repo> && wtshunt serve <repo>` to pick up
-the new one. A worktree that was never running in the first place picks
-up the correct wiring automatically the first time you `serve` it.
-
-If `front` also has a checked-in `.env` with its own `API_URL`, the
-`API_URL={port:api}` prefix in the `serve` template only wins if your
-framework's `.env` loader treats already-set environment variables as
-authoritative and doesn't overwrite them — the common default for most
-dotenv implementations, but worth confirming once for your stack.
-
-Because the proxy's host:port never changes across a switch, any
-cookies your client already holds carry over automatically. Whether the
-session they represent stays valid depends on whether the worktrees
-involved share a session store — see the shared-dev-database note
-below.
 
 ## Limitations and troubleshooting
 
@@ -333,6 +273,62 @@ themselves are computed fresh on every `<Tab>`.
 The zsh script initializes zsh's completion system itself (it calls
 `compinit` if `compdef` isn't already available), so it works even in a
 `.zshrc` that never calls `compinit` on its own.
+
+## Tasks (experimental)
+
+Tasks are wtshunt's advanced multi-repo layer — everything above works
+without them. The feature is experimental: expect its behavior to
+change as real-world feedback comes in.
+
+A single repo's worktrees only get you so far once a change spans more
+than one repo — say, an `api` branch and the `front` branch that talks
+to it. A **task** is a named preset that bundles one worktree per repo,
+so the whole group switches together:
+
+```sh
+wtshunt task add feature-x api/feature-x front/feature-x
+wtshunt task use feature-x
+```
+
+- `wtshunt task add <name> [repo/worktree ...]` creates a task. Repos
+  named explicitly use the given worktree; every other registered repo
+  gets prompted for (peco, or a numbered picker, with a leading option
+  to leave that repo out of the task entirely).
+- `wtshunt task use <name>` validates every member's worktree still
+  exists — if even one doesn't, nothing is applied — then switches all
+  of them at once. Reports which members have no server running yet,
+  and warns about any already-running server whose `{port:<repo>}`
+  wiring no longer matches (see below).
+- `wtshunt task list` lists tasks and their members, marking with `*`
+  any task whose members all match the current active worktrees.
+- `wtshunt task rm <name>` removes a task.
+
+**How repos actually stay wired together.** The fixed-port proxy in
+front of a service re-reads `state.json` on every request, so *that*
+part always reflects whichever worktree is currently active — no
+restart needed. A `serve` template's `{port:<repo>}` reference is
+different: it's substituted once, into the literal shell command run
+when that server starts, so it's fixed for as long as that process
+keeps running. Switching `api`'s active worktree doesn't retroactively
+change what an already-running `front` process is connected to — it
+keeps talking to `api`'s old port until you restart it. This is exactly
+what `task use` checks for: if a server is still running with
+`{port:<repo>}` wiring that no longer matches, it prints a warning
+telling you to `wtshunt stop <repo> && wtshunt serve <repo>` to pick up
+the new one. A worktree that was never running in the first place picks
+up the correct wiring automatically the first time you `serve` it.
+
+If `front` also has a checked-in `.env` with its own `API_URL`, the
+`API_URL={port:api}` prefix in the `serve` template only wins if your
+framework's `.env` loader treats already-set environment variables as
+authoritative and doesn't overwrite them — the common default for most
+dotenv implementations, but worth confirming once for your stack.
+
+Because the proxy's host:port never changes across a switch, any
+cookies your client already holds carry over automatically. Whether the
+session they represent stays valid depends on whether the worktrees
+involved share a session store — see the shared-dev-database note under
+Limitations above.
 
 ## Development
 
