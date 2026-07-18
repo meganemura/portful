@@ -9,7 +9,14 @@ import { statusCommand } from './commands/status.ts';
 import { stopCommand } from './commands/stop.ts';
 import { proxyCommand } from './commands/proxy.ts';
 
-async function completeRepoOrWorktree(current: string): Promise<string[]> {
+/**
+ * Flat list of every repo name plus every `repo/worktree` name across all
+ * configured repos (a repo whose worktrees can't be listed is skipped, not
+ * fatal to the rest). Prefix-filtering this single flat list against
+ * `current` is what lets an empty result fall through to the shell's normal
+ * file/command completion — see the completion handler below.
+ */
+async function repoAndWorktreeNames(): Promise<string[]> {
   let config;
   try {
     config = await loadConfig();
@@ -17,21 +24,20 @@ async function completeRepoOrWorktree(current: string): Promise<string[]> {
     return [];
   }
 
-  if (current.includes('/')) {
-    const [repoName] = current.split('/');
-    const repoConfig = config.repos[repoName];
-    if (!repoConfig) {
-      return Object.keys(config.repos);
-    }
-    try {
-      const worktrees = await listWorktrees(repoConfig.path);
-      return worktrees.map((wt) => `${repoName}/${wt.name}`);
-    } catch {
-      return [];
-    }
-  }
+  const perRepo = await Promise.all(
+    Object.entries(config.repos).map(async ([repoName, repoConfig]) => {
+      const names = [repoName];
+      try {
+        const worktrees = await listWorktrees(repoConfig.path);
+        names.push(...worktrees.map((wt) => `${repoName}/${wt.name}`));
+      } catch {
+        // Skip: this repo's worktrees can't be listed right now.
+      }
+      return names;
+    })
+  );
 
-  return Object.keys(config.repos);
+  return perRepo.flat();
 }
 
 function reportError(err: unknown): void {
@@ -183,6 +189,9 @@ const repoPositional = (y: Argv) =>
 
 const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'help', 'completion'];
 
+/** Commands whose first argument is a `repo` or `repo/worktree` name. */
+const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'proxy', 'run']);
+
 // Extracted so `help` can build a second, independent yargs instance and
 // re-parse `[command, '--help']` (or just `['--help']`) through it (see the
 // `help` command below) without disturbing the instance driving the current
@@ -296,18 +305,34 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
     // yargs' built-in one. This only affects what command name shows the
     // script; the `--get-yargs-completions` flag our script actually invokes
     // is a separate, always-on mechanism unaffected by this rename.
+    //
+    // Every branch filters its candidates by `current` and, crucially,
+    // returns an empty array on zero matches rather than falling back to a
+    // broader list: our zsh script treats an empty reply as "fall through to
+    // _default" (normal file/command completion), so an unmatched prefix
+    // like `run rails<Tab>` or a second argument like `run b bin/<Tab>`
+    // correctly gets ordinary shell completion instead of being stuck
+    // offering worktree names that can never match.
     .completion('completion-script', false, async () => {
       const { positionals, current } = completionContext();
+      const startsWithCurrent = (name: string) => name.startsWith(current);
+
       if (positionals.length === 0) {
-        return COMMAND_NAMES;
+        return COMMAND_NAMES.filter(startsWithCurrent);
       }
+
       const command = positionals[0];
-      if (command === 'help') {
-        return COMMAND_NAMES.filter((name) => name !== 'help');
+
+      if (positionals.length === 1 && command === 'help') {
+        return COMMAND_NAMES.filter((name) => name !== 'help').filter(startsWithCurrent);
       }
-      if (command === 'use' || command === 'serve' || command === 'stop' || command === 'proxy' || command === 'run') {
-        return completeRepoOrWorktree(current);
+
+      if (positionals.length === 1 && REPO_ARG_COMMANDS.has(command)) {
+        const names = await repoAndWorktreeNames();
+        return names.filter(startsWithCurrent);
       }
+
+      // Second argument onward, for every command (e.g. `run b bin/<Tab>`).
       return [];
     })
     .demandCommand(1, 'Please specify a command.')

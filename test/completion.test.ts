@@ -73,9 +73,10 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'completion',
     ]);
 
-    // "wtshunt use <Tab>": rest = [wtshunt, use], COMP_CWORD=2.
+    // "wtshunt use <Tab>": rest = [wtshunt, use], COMP_CWORD=2. First-argument
+    // candidates are every repo name plus every repo/worktree name, flat.
     const afterUse = await getCompletions(configDir, ['use'], 2);
-    assert.deepEqual(afterUse, ['b']);
+    assert.deepEqual(afterUse.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
 
     // "wtshunt use b/<Tab>": rest = [wtshunt, use, b/] (the partial text "b/"
     // is real, non-empty text, so zsh does include it), COMP_CWORD=2 pointing
@@ -98,7 +99,7 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
 
     // "wtshunt use <Tab>": rest = [wtshunt, use, ''], COMP_CWORD=2.
     const afterUse = await getCompletions(configDir, ['use', ''], 2);
-    assert.deepEqual(afterUse, ['b']);
+    assert.deepEqual(afterUse.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
 
     // "wtshunt use b/<Tab>": rest = [wtshunt, use, b/], COMP_CWORD=2.
     const afterUseRepoSlash = await getCompletions(configDir, ['use', 'b/'], 2);
@@ -113,7 +114,76 @@ test('completion: falls back to last-word-is-current when COMP_CWORD is absent',
   const { base, configDir } = await makeRepoFixture();
   try {
     const afterUse = await getCompletions(configDir, ['use', '']);
-    assert.deepEqual(afterUse, ['b']);
+    assert.deepEqual(afterUse.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: first argument is prefix-filtered across repo and worktree names', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    // "wtshunt run b/fe<Tab>": only worktrees under "b" starting with "fe".
+    const feMatches = await getCompletions(configDir, ['run', 'b/fe'], 2);
+    assert.deepEqual(feMatches, ['b/feature-auth']);
+
+    // "wtshunt use b<Tab>": everything starts with "b" here, so all of them.
+    const bMatches = await getCompletions(configDir, ['use', 'b'], 2);
+    assert.deepEqual(bMatches.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: first argument with no matches returns empty (falls through to shell default)', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    // "wtshunt run rails<Tab>": no repo/worktree starts with "rails", so this
+    // must come back empty rather than some fallback list — that's what lets
+    // zsh's `_default` take over and offer ordinary command/file completion.
+    const noMatches = await getCompletions(configDir, ['run', 'rails'], 2);
+    assert.deepEqual(noMatches, []);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: second argument onward is always empty, for any command', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    // "wtshunt run b <Tab>": the repo has already been chosen; from here on
+    // it's an arbitrary command, so completion must fall through to the
+    // shell's normal file/command completion (e.g. `run b bin/<Tab>`).
+    const afterRepo = await getCompletions(configDir, ['run', 'b', ''], 3);
+    assert.deepEqual(afterRepo, []);
+
+    const afterRepoPartial = await getCompletions(configDir, ['run', 'b', 'bin/'], 3);
+    assert.deepEqual(afterRepoPartial, []);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: top-level candidates are prefix-filtered', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    const stMatches = await getCompletions(configDir, ['st'], 1);
+    assert.deepEqual(stMatches.sort(), ['status', 'stop'].sort());
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: help-argument candidates are prefix-filtered', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    const uMatches = await getCompletions(configDir, ['help', 'u'], 2);
+    assert.deepEqual(uMatches, ['use']);
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });

@@ -113,9 +113,21 @@ command's own help (equivalent to `wtshunt <command> --help`).
 ## Shell completion
 
 `wtshunt completion` prints a completion script for the shell that's
-running it. It suggests command names, then registered repo names, then
-`repo/worktree` names — regenerated dynamically each time, so newly added
-worktrees complete right away without reinstalling anything.
+running it. Completions are computed dynamically on every `<Tab>`, so
+newly added repos or worktrees complete right away without reinstalling
+anything:
+
+- With nothing typed yet, it suggests command names (`use`, `serve`,
+  `run`, `status`, `stop`, `proxy`, `help`, `completion`).
+- As the first argument to `use`, `serve`, `stop`, `proxy`, or `run`, it
+  suggests every repo name and every `repo/worktree` name, so
+  `run <Tab>` lists them all and `run b/<Tab>` narrows to worktrees of
+  `b`. As the argument to `help`, it suggests command names instead.
+- Anywhere else — a prefix that matches no repo or worktree (e.g.
+  `run rails<Tab>`), or the second argument onward for any command (e.g.
+  `run b bin/<Tab>`) — it deliberately returns no matches, which lets the
+  shell fall back to its normal file/command completion instead of
+  getting stuck offering worktree names that can never apply.
 
 zsh:
 
