@@ -1,5 +1,32 @@
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
+import { loadConfig } from './config.ts';
+import { listWorktrees } from './repo.ts';
+
+async function completeRepoOrWorktree(current: string): Promise<string[]> {
+  let config;
+  try {
+    config = await loadConfig();
+  } catch {
+    return [];
+  }
+
+  if (current.includes('/')) {
+    const [repoName] = current.split('/');
+    const repoConfig = config.repos[repoName];
+    if (!repoConfig) {
+      return Object.keys(config.repos);
+    }
+    try {
+      const worktrees = await listWorktrees(repoConfig.path);
+      return worktrees.map((wt) => `${repoName}/${wt.name}`);
+    } catch {
+      return [];
+    }
+  }
+
+  return Object.keys(config.repos);
+}
 
 function notImplemented(name: string): () => Promise<void> {
   return async () => {
@@ -13,8 +40,35 @@ function reportError(err: unknown): void {
   process.exitCode = 1;
 }
 
+/**
+ * Words already typed on the command line at completion time, excluding the
+ * script name and the in-progress word being completed. Computed directly
+ * from `process.argv` rather than the `argv` yargs hands to the completion
+ * function: that `argv` comes from an internal re-parse whose positional
+ * array shape depends on whether a command matched, which is unreliable to
+ * introspect.
+ */
+function completionPositionals(): string[] {
+  const args = hideBin(process.argv);
+  const idx = args.indexOf('--get-yargs-completions');
+  if (idx === -1) {
+    return [];
+  }
+  const rest = args.slice(idx + 1); // [scriptName, ...typed words, currentWord]
+  return rest.slice(1, -1);
+}
+
+// yargs internally re-parses the completion args to build the `argv` object
+// handed to the custom completion function below, and that re-parse also
+// invokes the matched command's handler as a side effect. Guard against it so
+// that pressing <Tab> never actually runs `use`, `serve`, `stop`, etc.
+const isCompletionRequest = process.argv.includes('--get-yargs-completions');
+
 function handle(fn: () => Promise<void>): () => Promise<void> {
   return async () => {
+    if (isCompletionRequest) {
+      return;
+    }
     try {
       await fn();
     } catch (err) {
@@ -32,7 +86,6 @@ const repoPositional = (y: Argv) =>
 await yargs(hideBin(process.argv))
   .scriptName('wtshunt')
   .locale('en')
-  .parserConfiguration({ 'unknown-options-as-args': true })
   .command('use [repo]', 'Select the active worktree for a repo', repoPositional, handle(notImplemented('use')))
   .command(
     'serve [repo]',
@@ -54,7 +107,17 @@ await yargs(hideBin(process.argv))
     repoPositional,
     handle(notImplemented('proxy'))
   )
-  .completion('completion', 'Generate a shell completion script', async () => [])
+  .completion('completion', 'Generate a shell completion script', async (current) => {
+    const positionals = completionPositionals();
+    if (positionals.length === 0) {
+      return ['use', 'serve', 'run', 'status', 'stop', 'proxy'];
+    }
+    const command = positionals[0];
+    if (command === 'use' || command === 'serve' || command === 'stop' || command === 'proxy' || command === 'run') {
+      return completeRepoOrWorktree(current);
+    }
+    return [];
+  })
   .demandCommand(1)
   .strict(false)
   .fail((msg, err) => {
