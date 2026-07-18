@@ -1,57 +1,63 @@
-import { loadConfig } from '../config.ts';
-import { readState } from '../state.ts';
-import { taskMatchesCurrentActive } from '../tasks.ts';
+import { buildOverview, type Overview } from '../overview.ts';
 
-export async function statusCommand(): Promise<void> {
-  const config = await loadConfig();
-  const state = await readState();
+export interface StatusArgs {
+  json?: boolean;
+}
 
-  for (const [repoName, repoConfig] of Object.entries(config.repos)) {
-    const rs = state.repos[repoName];
-    console.log(`${repoName} (${repoConfig.path})`);
-    console.log(`  active: ${rs?.active ?? '(none)'}`);
+export async function statusCommand(args: StatusArgs = {}): Promise<void> {
+  const overview = await buildOverview();
 
-    const servers = rs?.servers ?? {};
-    const serverNames = Object.keys(servers);
+  if (args.json) {
+    console.log(JSON.stringify(overview));
+    return;
+  }
+
+  printHumanReadable(overview);
+}
+
+function printHumanReadable(overview: Overview): void {
+  for (const repo of overview.repos) {
+    console.log(`${repo.name} (${repo.path})`);
+    console.log(`  active: ${repo.active ?? '(none)'}`);
+
+    const serverNames = Object.keys(repo.servers);
     if (serverNames.length === 0) {
       console.log('  servers: (none running)');
     } else {
       console.log('  servers:');
       for (const name of serverNames) {
-        const entry = servers[name];
+        const entry = repo.servers[name];
         console.log(`    ${name}\t${entry.branch}\tport ${entry.port}\tpid ${entry.pid}`);
       }
     }
 
-    if (rs?.proxy) {
-      const activeName = rs.active;
-      const activePort = activeName ? servers[activeName]?.port : undefined;
+    if (repo.proxy) {
+      const activeName = repo.active;
+      const activePort = activeName ? repo.servers[activeName]?.port : undefined;
       const destination =
         activeName === undefined
           ? '(no active worktree)'
           : activePort !== undefined
             ? `${activeName} (port ${activePort})`
             : `${activeName} (not running)`;
-      console.log(`  proxy: running (pid ${rs.proxy.pid}) ${repoConfig.fixedPort} -> ${destination}`);
+      console.log(`  proxy: running (pid ${repo.proxy.pid}) ${repo.fixedPort} -> ${destination}`);
     } else {
-      console.log(`  proxy: not running (fixed port ${repoConfig.fixedPort})`);
+      console.log(`  proxy: not running (fixed port ${repo.fixedPort})`);
     }
 
     console.log('');
   }
 
-  const taskNames = Object.keys(state.tasks);
-  if (taskNames.length === 0) {
+  if (overview.tasks.length === 0) {
     console.log('Tasks: (none defined)');
   } else {
     console.log('Tasks:');
-    for (const name of taskNames) {
-      const task = state.tasks[name];
-      const marker = taskMatchesCurrentActive(state, task) ? ' *' : '';
+    for (const task of overview.tasks) {
+      const marker = task.matchesCurrentActive ? ' *' : '';
       const memberList = Object.entries(task.members)
         .map(([repo, wt]) => `${repo}/${wt}`)
         .join(', ');
-      console.log(`  ${name}${marker}\t${memberList}`);
+      console.log(`  ${task.name}${marker}\t${memberList}`);
     }
   }
 }

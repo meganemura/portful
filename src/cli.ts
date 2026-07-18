@@ -255,9 +255,14 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
     .command(
       'status',
       'Show active worktrees, running servers, and proxy state',
-      () => {},
-      handle(async () => {
-        await statusCommand();
+      (y) =>
+        y.option('json', {
+          type: 'boolean',
+          default: false,
+          describe: 'Print machine-readable JSON instead of the human-readable summary',
+        }),
+      handle(async (argv) => {
+        await statusCommand({ json: argv.json as boolean });
       })
     )
     .command(
