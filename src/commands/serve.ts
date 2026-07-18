@@ -1,0 +1,98 @@
+import { spawn } from 'node:child_process';
+import { loadConfig } from '../config.ts';
+import { allocatePort } from '../ports.ts';
+import { resolveRepo, listWorktrees, findWorktree } from '../repo.ts';
+import { ensureRepoState, readState, withState } from '../state.ts';
+
+const EARLY_EXIT_THRESHOLD_MS = 2000;
+
+export interface ServeArgs {
+  repo?: string;
+}
+
+export async function serveCommand(args: ServeArgs): Promise<void> {
+  const config = await loadConfig();
+  const cwd = process.cwd();
+  const { repoName, worktreeName } = await resolveRepo(config, args.repo, cwd);
+  const repoConfig = config.repos[repoName];
+  const worktrees = await listWorktrees(repoConfig.path);
+
+  const state = await readState();
+  const targetName = worktreeName ?? state.repos[repoName]?.active;
+  if (!targetName) {
+    throw new Error(`No active worktree for repo "${repoName}". Run "wtshunt use ${repoName}/<worktree>" first.`);
+  }
+  const worktree = findWorktree(worktrees, targetName);
+  if (!worktree) {
+    throw new Error(`Worktree "${targetName}" not found in repo "${repoName}".`);
+  }
+
+  const allocation = await withState(async (s) => {
+    const rs = ensureRepoState(s, repoName);
+    const existing = rs.servers[targetName];
+    if (existing) {
+      return { alreadyRunning: true as const, entry: existing };
+    }
+    const port = await allocatePort({ worktree: targetName, portRange: repoConfig.portRange, stickyPorts: rs.ports });
+    rs.ports[targetName] = port;
+    return { alreadyRunning: false as const, port };
+  });
+
+  if (allocation.alreadyRunning) {
+    console.log(
+      `Server already running for "${targetName}" on port ${allocation.entry.port} (pid ${allocation.entry.pid}). Refusing to start a duplicate.`
+    );
+    return;
+  }
+
+  const { port } = allocation;
+  const serveCmd = repoConfig.serve.replaceAll('{port}', String(port));
+
+  console.log(`Starting server for "${targetName}" on port ${port}...`);
+
+  const child = spawn('sh', ['-c', serveCmd], {
+    cwd: worktree.path,
+    stdio: 'inherit',
+    detached: true,
+  });
+
+  const pid = child.pid;
+  if (pid === undefined) {
+    throw new Error('Failed to spawn server process.');
+  }
+
+  await withState((s) => {
+    const rs = ensureRepoState(s, repoName);
+    rs.servers[targetName] = { path: worktree.path, branch: worktree.branch, port, pid };
+  });
+
+  const startedAt = Date.now();
+
+  const forwardSignal = (signal: NodeJS.Signals) => {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      // Process group may already be gone.
+    }
+  };
+  process.on('SIGINT', forwardSignal);
+  process.on('SIGTERM', forwardSignal);
+
+  child.on('exit', (code, signal) => {
+    void (async () => {
+      if (Date.now() - startedAt < EARLY_EXIT_THRESHOLD_MS) {
+        console.error(
+          'Hint: the server exited very quickly. Check whether .env or node_modules ' +
+            'have been copied into this worktree.'
+        );
+      }
+
+      await withState((s) => {
+        const rs = ensureRepoState(s, repoName);
+        delete rs.servers[targetName];
+      });
+
+      process.exit(code ?? (signal ? 1 : 0));
+    })();
+  });
+}

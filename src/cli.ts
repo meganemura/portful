@@ -2,6 +2,8 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { loadConfig } from './config.ts';
 import { listWorktrees } from './repo.ts';
+import { serveCommand } from './commands/serve.ts';
+import { runCommand } from './commands/run.ts';
 
 async function completeRepoOrWorktree(current: string): Promise<string[]> {
   let config;
@@ -64,13 +66,13 @@ function completionPositionals(): string[] {
 // that pressing <Tab> never actually runs `use`, `serve`, `stop`, etc.
 const isCompletionRequest = process.argv.includes('--get-yargs-completions');
 
-function handle(fn: () => Promise<void>): () => Promise<void> {
-  return async () => {
+function handle<A>(fn: (argv: A) => Promise<void>): (argv: A) => Promise<void> {
+  return async (argv: A) => {
     if (isCompletionRequest) {
       return;
     }
     try {
-      await fn();
+      await fn(argv);
     } catch (err) {
       reportError(err);
     }
@@ -83,6 +85,20 @@ const repoPositional = (y: Argv) =>
     describe: 'repo, or repo/worktree to target directly',
   });
 
+// `run` bypasses yargs entirely: any flag on the passed-through command (e.g.
+// `-h`, `--help`) would otherwise be intercepted by yargs' own option parser
+// (`-h`/`--help` are registered globally) instead of reaching the child
+// process. This check runs before yargs ever sees argv.
+const bypassArgs = hideBin(process.argv);
+if (bypassArgs[0] === 'run') {
+  try {
+    await runCommand(bypassArgs.slice(1));
+  } catch (err) {
+    reportError(err);
+  }
+  process.exit(process.exitCode ?? 0);
+}
+
 await yargs(hideBin(process.argv))
   .scriptName('wtshunt')
   .locale('en')
@@ -91,13 +107,20 @@ await yargs(hideBin(process.argv))
     'serve [repo]',
     'Start a server for the active (or given) worktree in the foreground',
     repoPositional,
-    handle(notImplemented('serve'))
+    handle(async (argv) => {
+      await serveCommand({ repo: argv.repo as string | undefined });
+    })
   )
   .command(
     'run [target] [cmd..]',
     'Run a command inside a worktree (flags are passed through untouched)',
     (y) => y,
-    handle(notImplemented('run'))
+    // Unreachable in practice: the bypass above intercepts every real `run`
+    // invocation before yargs parses anything. Kept only so `run` shows up
+    // in --help and top-level completion, with a safety-net implementation.
+    handle(async () => {
+      await runCommand(hideBin(process.argv).slice(1));
+    })
   )
   .command('status', 'Show active worktrees, running servers, and proxy state', () => {}, handle(notImplemented('status')))
   .command('stop [repo]', 'Stop the server for the active (or given) worktree', repoPositional, handle(notImplemented('stop')))
