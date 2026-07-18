@@ -424,6 +424,13 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
     .demandCommand(1, 'Please specify a command.')
     .strictCommands()
     .fail((msg, err, yargsInstance) => {
+      // During a completion request, yargs' internal re-parse of the typed
+      // words routinely fails validation (e.g. `task u` while completing
+      // `use`). The shell only captures stdout, so anything printed here
+      // would splatter over the user's prompt on every <Tab>.
+      if (isCompletionRequest) {
+        return;
+      }
       if (err) {
         // A real thrown Error (not a yargs parsing/validation failure). Every
         // command handler already catches and reports its own errors via

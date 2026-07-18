@@ -22,7 +22,6 @@ direnv やシェルの alias のようなディレクトリ単位のツールが
 - worktree に `cd` せずに単発コマンドを実行: `wtshunt run`
 - プロキシの向き先 worktree を切り替え: `wtshunt use`
 - 全 worktree の稼働状況を一覧: `wtshunt status`
-- 関連する複数リポジトリの worktree をまとめて切り替え: `wtshunt task`
 
 ## これが不要な人
 
@@ -161,8 +160,8 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 
 設定済みの各リポジトリについて、アクティブな worktree、稼働中の全
 サーバ(worktree、ブランチ、ポート、pid)、プロキシの稼働状況と現在の
-転送先を表示し、続けて定義済みの各タスクとそのメンバーを一覧します
-(現在のアクティブ worktree と一致するタスクには `*` が付きます)。
+転送先を表示します。(定義済みのタスクも一覧します — 下の
+「タスク (experimental)」を参照してください。)
 
 ### `wtshunt stop [repo]`
 
@@ -196,7 +195,6 @@ experimental な複数リポジトリ向けプリセットです。下の
 
 `wtshunt --help` と同じ内容を表示します。コマンド名を付けると、その
 コマンド自体のヘルプ(`wtshunt <command> --help` 相当)を表示します。
-
 
 ## 制約とトラブルシューティング
 

@@ -159,8 +159,8 @@ by hand.
 
 Shows, for every configured repo: the active worktree, every running
 server (worktree, branch, port, pid), and whether the proxy is running
-and what it's currently routing to — followed by every defined task and
-its members, marked with `*` if it matches the current active worktrees.
+and what it's currently routing to. (Also lists any defined tasks — see
+[Tasks (experimental)](#tasks-experimental) below.)
 
 ### `wtshunt stop [repo]`
 

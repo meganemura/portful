@@ -338,3 +338,25 @@ test('completion script: the hidden completion-script command does not appear in
   assert.match(stdout, /wtshunt completion\s/);
   assert.doesNotMatch(stdout, /completion-script/);
 });
+
+test('completion: emits nothing on stderr even when the internal re-parse fails validation', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    // `task u` makes yargs' internal re-parse hit "Unknown command: u";
+    // without the completion guard in .fail(), help + error text would leak
+    // to stderr and smear over the user's prompt on every <Tab>.
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      [binPath, '--get-yargs-completions', 'wtshunt', 'task', 'u'],
+      { env: { ...process.env, XDG_CONFIG_HOME: configDir, COMP_CWORD: '2' } }
+    );
+    assert.deepEqual(
+      stdout.split('\n').filter((line) => line.length > 0),
+      ['use']
+    );
+    assert.equal(stderr, '');
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
