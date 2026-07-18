@@ -23,6 +23,14 @@ exists for.
 - Flip which worktree the proxy points at: `wtshunt use`
 - See what's running across every worktree: `wtshunt status`
 
+## When you don't need this
+
+- You're not using git worktrees at all — there's nothing here for you.
+- Your client can be restarted cheaply, or already re-reads its target
+  from an env var/config file — just point it at the new port directly.
+- You only ever run one worktree's server at a time — plain `cd` and
+  start/stop already does the job.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on Node 25)
@@ -84,15 +92,18 @@ serve = "bundle exec rails s -p {port}"
   the main checkout) becomes selectable.
 - `serve` is run with `sh -c`, with `{port}` substituted for the port
   assigned to that worktree. This means env-var prefixes work too, e.g.
-  `serve = "PORT={port} bin/dev"`. The template must actually
-  interpolate `{port}`: if it doesn't, the server starts on whatever
-  port your framework defaults to while `status` and the proxy still
-  believe it's on the assigned one (see Limitations).
+  `serve = "PORT={port} bin/dev"`. The literal `{port}` placeholder is
+  required — config loading fails immediately if it's missing, since
+  without it the server would bind whatever port your framework
+  defaults to while `status` and the proxy keep believing it's on the
+  assigned one.
 - Each worktree that ever gets a `wtshunt serve` keeps the same port
   across restarts (a "sticky" assignment), unless wtshunt finds the
   port occupied at assignment time, in which case the next free port in
-  `port_range` is used. The occupancy probe is a plain local bind test
-  and can be fooled — see Limitations.
+  `port_range` is used. The occupancy probe binds the IPv4 and IPv6
+  wildcard addresses, which catches a foreign listener regardless of
+  which interface it bound — see Limitations for what it still can't
+  catch.
 
 If the config file is missing, `wtshunt` prints this example and exits.
 
@@ -139,9 +150,11 @@ and what it's currently routing to.
 
 ### `wtshunt stop [repo]`
 
-Stops the running server for the active (or given) worktree by sending
-`SIGTERM` to its process group. It does not wait for the process to
-actually exit.
+Stops the running server for the active (or given) worktree: sends
+`SIGTERM` to its process group, then polls for up to 2 seconds to
+confirm it actually exited before removing it from `wtshunt status`. If
+it's still alive after that, the entry is left in place and `stop` exits
+non-zero with a warning (see Limitations).
 
 ### `wtshunt proxy [repo]`
 
@@ -168,19 +181,25 @@ command's own help (equivalent to `wtshunt <command> --help`).
   dropped. Point long-lived sockets directly at the worktree's own port,
   or keep them off the proxied path.
 - **`status` reports process liveness, not reachability.** A server
-  whose template lost `{port}`, or that failed to bind where wtshunt
-  expected, still shows as running while the proxy answers 502. When
+  that failed to bind where wtshunt expected — wrong port flag, wrong
+  interface — still shows as running while the proxy answers 502. When
   `status` and reality disagree, `lsof -i :<port>` tells you who is
   actually listening.
-- **Port probes bind `127.0.0.1` only.** A foreign process listening on
-  `0.0.0.0` or IPv6 can slip past the free-port check, and a sticky port
-  stolen by another process can make the new server die instantly with
-  `EADDRINUSE`. If a server exits right after `wtshunt serve`, check the
-  assigned port's occupancy as well as the usual missing-`.env` /
-  missing-`node_modules` suspects.
-- **`stop` is fire-and-forget.** The state entry is removed and
-  `SIGTERM` is sent without confirming the exit; a server that traps
-  `SIGTERM` can linger holding its port, invisible to `status`.
+- **Port probes can still be fooled.** The free-port check binds the
+  IPv4 and IPv6 wildcard addresses, which catches a foreign process
+  regardless of which interface it's on, but a sticky port stolen by
+  another process in the narrow window between that check and the new
+  server's own bind can still make it die instantly with `EADDRINUSE`.
+  If a server exits right within a couple of seconds of `wtshunt serve`,
+  the hint printed tells you whether the assigned port is now held by
+  another process (per `lsof`) or whether this looks like the usual
+  missing-`.env` / missing-`node_modules` case.
+- **`stop` waits up to 2 seconds, then gives up loudly.** It sends
+  `SIGTERM` and polls for the process to actually exit; if it's still
+  alive after 2 seconds (traps `SIGTERM`, or is just shutting down
+  slowly), the state entry is deliberately left in place — you'll keep
+  seeing it in `wtshunt status`, and `stop` exits non-zero with a
+  warning rather than silently pretending it worked.
 - **Worktrees usually share a dev database.** Running branches with
   diverging migrations against the same database will break one of them;
   consider per-worktree database names if you switch heavily.
