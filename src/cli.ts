@@ -162,7 +162,7 @@ await yargs(hideBin(process.argv))
     return [];
   })
   .demandCommand(1)
-  .strict(false)
+  .strictCommands()
   .fail((msg, err) => {
     reportError(err ?? new Error(msg));
   })
