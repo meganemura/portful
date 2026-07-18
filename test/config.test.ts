@@ -129,6 +129,67 @@ test('config: serve template missing {port} throws a validation error', async ()
   }
 });
 
+test('config: a template with both {port:<repo>} and {port} passes validation', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-port-ref-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.api]',
+        'path = "/tmp/api"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[repos.front]',
+        'path = "/tmp/front"',
+        'fixed_port = 8080',
+        'port_range = [8101, 8199]',
+        'serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      const config = await loadConfig();
+      assert.equal(config.repos.front.serve, 'API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev');
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
+test('config: a template with only {port:<repo>} and no bare {port} still fails validation', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-port-ref-only-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.front]',
+        'path = "/tmp/front"',
+        'fixed_port = 8080',
+        'port_range = [8101, 8199]',
+        'serve = "API_URL=http://127.0.0.1:{port:api} npm run dev"',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /\{port\}/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
 test('config: malformed port_range throws a validation error', async () => {
   const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-invalid-range-'));
   try {

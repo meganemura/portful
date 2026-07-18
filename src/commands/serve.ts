@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { loadConfig } from '../config.ts';
 import { allocatePort, findPortOccupant } from '../ports.ts';
+import { applyPortRefs, parsePortRefs, resolvePortRef } from '../portRefs.ts';
 import { resolveRepo, listWorktrees, findWorktree } from '../repo.ts';
 import { ensureRepoState, readState, withState } from '../state.ts';
 
@@ -33,9 +34,19 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     if (existing) {
       return { alreadyRunning: true as const, entry: existing };
     }
+
     const port = await allocatePort({ worktree: targetName, portRange: repoConfig.portRange, stickyPorts: rs.ports });
     rs.ports[targetName] = port;
-    return { alreadyRunning: false as const, port };
+
+    // {port:<repo>} references resolve inside this same transaction, so a
+    // referenced repo's port allocation and this server's own land in one
+    // atomic write together.
+    const resolvedRefs: Record<string, number> = {};
+    for (const refRepoName of parsePortRefs(repoConfig.serve)) {
+      resolvedRefs[refRepoName] = await resolvePortRef(config, s, refRepoName);
+    }
+
+    return { alreadyRunning: false as const, port, resolvedRefs };
   });
 
   if (allocation.alreadyRunning) {
@@ -45,8 +56,10 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     return;
   }
 
-  const { port } = allocation;
-  const serveCmd = repoConfig.serve.replaceAll('{port}', String(port));
+  const { port, resolvedRefs } = allocation;
+  // {port:<repo>} references are substituted before the plain {port}
+  // placeholder (see portRefs.ts for why the two can't collide).
+  const serveCmd = applyPortRefs(repoConfig.serve, resolvedRefs).replaceAll('{port}', String(port));
 
   console.log(`Starting server for "${targetName}" on port ${port}...`);
 
@@ -63,7 +76,13 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
 
   await withState((s) => {
     const rs = ensureRepoState(s, repoName);
-    rs.servers[targetName] = { path: worktree.path, branch: worktree.branch, port, pid };
+    rs.servers[targetName] = {
+      path: worktree.path,
+      branch: worktree.branch,
+      port,
+      pid,
+      ...(Object.keys(resolvedRefs).length > 0 ? { resolvedRefs } : {}),
+    };
   });
 
   const startedAt = Date.now();
