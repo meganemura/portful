@@ -7,6 +7,7 @@ import { runCommand } from './commands/run.ts';
 import { useCommand } from './commands/use.ts';
 import { statusCommand } from './commands/status.ts';
 import { stopCommand } from './commands/stop.ts';
+import { proxyCommand } from './commands/proxy.ts';
 
 async function completeRepoOrWorktree(current: string): Promise<string[]> {
   let config;
@@ -31,13 +32,6 @@ async function completeRepoOrWorktree(current: string): Promise<string[]> {
   }
 
   return Object.keys(config.repos);
-}
-
-function notImplemented(name: string): () => Promise<void> {
-  return async () => {
-    console.error(`"${name}" is not implemented yet.`);
-    process.exitCode = 1;
-  };
 }
 
 function reportError(err: unknown): void {
@@ -152,7 +146,9 @@ await yargs(hideBin(process.argv))
     'proxy [repo]',
     'Start the reverse proxy for a repo in the foreground',
     repoPositional,
-    handle(notImplemented('proxy'))
+    handle(async (argv) => {
+      await proxyCommand({ repo: argv.repo as string | undefined });
+    })
   )
   .completion('completion', 'Generate a shell completion script', async (current) => {
     const positionals = completionPositionals();
