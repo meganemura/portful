@@ -82,20 +82,6 @@ const repoPositional = (y: Argv) =>
     describe: 'repo, or repo/worktree to target directly',
   });
 
-// `run` bypasses yargs entirely: any flag on the passed-through command (e.g.
-// `-h`, `--help`) would otherwise be intercepted by yargs' own option parser
-// (`-h`/`--help` are registered globally) instead of reaching the child
-// process. This check runs before yargs ever sees argv.
-const bypassArgs = hideBin(process.argv);
-if (bypassArgs[0] === 'run') {
-  try {
-    await runCommand(bypassArgs.slice(1));
-  } catch (err) {
-    reportError(err);
-  }
-  process.exit(process.exitCode ?? 0);
-}
-
 await yargs(hideBin(process.argv))
   .scriptName('wtshunt')
   .locale('en')
@@ -118,11 +104,14 @@ await yargs(hideBin(process.argv))
   .command(
     'run [target] [cmd..]',
     'Run a command inside a worktree (flags are passed through untouched)',
-    (y) => y,
-    // Unreachable in practice: the bypass above intercepts every real `run`
-    // invocation before yargs parses anything. Kept only so `run` shows up
-    // in --help and top-level completion, with a safety-net implementation.
+    // Disables this command's own --help/--version so a flag meant for the
+    // wrapped command (e.g. `wtshunt run b rails s -h`) reaches it instead
+    // of being swallowed by yargs. Other commands are unaffected.
+    (y) => y.help(false).version(false),
     handle(async () => {
+      // Read raw argv rather than yargs' parsed result: yargs-parser still
+      // splits flags like `-p 3105` out of the positional array internally,
+      // but since runCommand ignores that parse entirely, it doesn't matter.
       await runCommand(hideBin(process.argv).slice(1));
     })
   )

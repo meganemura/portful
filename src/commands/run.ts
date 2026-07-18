@@ -3,12 +3,22 @@ import { loadConfig } from '../config.ts';
 import { findWorktree, listWorktrees, looksLikeRepoArg, parseRepoArg, resolveRepoFromCwd } from '../repo.ts';
 import { readState } from '../state.ts';
 
+const RUN_USAGE =
+  'Usage: wtshunt run [repo[/worktree]] <cmd...>\n' +
+  'Run a command inside a worktree without changing directory. Flags on <cmd...> are passed through untouched.';
+
 /**
- * `wtshunt run [target] <cmd...>` never goes through yargs option parsing
- * (see cli.ts), so `rawArgs` is the raw argv exactly as typed after `run`,
- * flags and all.
+ * `rawArgs` is the raw argv exactly as typed after `run`, flags and all
+ * (see cli.ts: the `run` command disables yargs' own --help/--version so
+ * nothing upstream intercepts a flag meant for the wrapped command; this
+ * function reads `rawArgs` directly rather than any yargs-parsed argv).
  */
 export async function runCommand(rawArgs: string[]): Promise<void> {
+  if (rawArgs[0] === '-h' || rawArgs[0] === '--help') {
+    console.log(RUN_USAGE);
+    return;
+  }
+
   const config = await loadConfig();
 
   let target: string | undefined;
