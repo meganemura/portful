@@ -50,7 +50,7 @@ export function ensureRepoState(state: State, repo: string): RepoState {
   return repoState;
 }
 
-function isAlive(pid: number): boolean {
+export function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
