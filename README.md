@@ -128,3 +128,7 @@ Open a new shell (or `source` the rc file) to pick it up. If you add repos
 or worktrees later, no reinstall is needed — only the static script (which
 command names exist) is appended once; the repo and worktree suggestions
 themselves are computed fresh on every `<Tab>`.
+
+The zsh script initializes zsh's completion system itself (it calls
+`compinit` if `compdef` isn't already available), so it works even in a
+`.zshrc` that never calls `compinit` on its own.

@@ -39,6 +39,92 @@ function reportError(err: unknown): void {
   process.exitCode = 1;
 }
 
+const APP_NAME = 'wtshunt';
+
+function isZshShell(): boolean {
+  return (process.env.SHELL ?? '').includes('zsh');
+}
+
+/**
+ * zsh script based on yargs' own template (node_modules/yargs/build/lib/completion-templates.js),
+ * with two changes: a guard that initializes zsh's completion system
+ * (compinit/compdef) if the user's shell startup files haven't already done
+ * so — without it, sourcing this script fails with "command not found:
+ * compdef" in any zshrc that never calls compinit — and a fix for a stray
+ * quote in the upstream `zsh_eval_context` check.
+ */
+function zshCompletionScript(): string {
+  return `#compdef ${APP_NAME}
+###-begin-${APP_NAME}-completions-###
+#
+# yargs command completion script
+#
+# Installation: ${APP_NAME} completion >> ~/.zshrc
+#    or ${APP_NAME} completion >> ~/.zprofile on OSX.
+#
+if ! typeset -f compdef >/dev/null 2>&1; then
+  autoload -Uz compinit
+  compinit
+fi
+_${APP_NAME}_yargs_completions()
+{
+  local reply
+  local si=$IFS
+  IFS=$'\\n' reply=($(COMP_CWORD="$((CURRENT-1))" COMP_LINE="$BUFFER" COMP_POINT="$CURSOR" ${APP_NAME} --get-yargs-completions "\${words[@]}"))
+  IFS=$si
+  if [[ \${#reply} -gt 0 ]]; then
+    _describe 'values' reply
+  else
+    _default
+  fi
+}
+if [[ "\${zsh_eval_context[-1]}" == "loadautofunc" ]]; then
+  _${APP_NAME}_yargs_completions "$@"
+else
+  compdef _${APP_NAME}_yargs_completions ${APP_NAME}
+fi
+###-end-${APP_NAME}-completions-###
+`;
+}
+
+/** bash script, ported as-is from yargs' own template: `complete -F` needs no init guard. */
+function bashCompletionScript(): string {
+  return `###-begin-${APP_NAME}-completions-###
+#
+# yargs command completion script
+#
+# Installation: ${APP_NAME} completion >> ~/.bashrc
+#    or ${APP_NAME} completion >> ~/.bash_profile on OSX.
+#
+_${APP_NAME}_yargs_completions()
+{
+    local cur_word args type_list
+
+    cur_word="\${COMP_WORDS[COMP_CWORD]}"
+    args=("\${COMP_WORDS[@]}")
+
+    # ask yargs to generate completions.
+    # see https://stackoverflow.com/a/40944195/7080036 for the spaces-handling awk
+    mapfile -t type_list < <(${APP_NAME} --get-yargs-completions "\${args[@]}")
+    mapfile -t COMPREPLY < <(compgen -W "$( printf '%q ' "\${type_list[@]}" )" -- "\${cur_word}" |
+        awk '/ / { print "\\""$0"\\"" } /^[^ ]+$/ { print $0 }')
+
+    # if no match was found, fall back to filename completion
+    if [ \${#COMPREPLY[@]} -eq 0 ]; then
+      COMPREPLY=()
+    fi
+
+    return 0
+}
+complete -o bashdefault -o default -F _${APP_NAME}_yargs_completions ${APP_NAME}
+###-end-${APP_NAME}-completions-###
+`;
+}
+
+function generateCompletionScript(): string {
+  return isZshShell() ? zshCompletionScript() : bashCompletionScript();
+}
+
 /**
  * Words already typed on the command line at completion time, plus the
  * in-progress word being completed. Computed directly from `process.argv`
@@ -152,7 +238,21 @@ await yargs(hideBin(process.argv))
       await proxyCommand({ repo: argv.repo as string | undefined });
     })
   )
-  .completion('completion', 'Generate a shell completion script', async () => {
+  .command(
+    'completion',
+    'Generate a shell completion script',
+    () => {},
+    handle(async () => {
+      console.log(generateCompletionScript());
+    })
+  )
+  // Registered under a hidden name (description: false keeps it out of
+  // --help) rather than the default 'completion', so that name is free for
+  // our own `completion` command above to print our own script instead of
+  // yargs' built-in one. This only affects what command name shows the
+  // script; the `--get-yargs-completions` flag our script actually invokes
+  // is a separate, always-on mechanism unaffected by this rename.
+  .completion('completion-script', false, async () => {
     const { positionals, current } = completionContext();
     if (positionals.length === 0) {
       return ['use', 'serve', 'run', 'status', 'stop', 'proxy'];

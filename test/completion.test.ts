@@ -110,3 +110,35 @@ test('completion: falls back to last-word-is-current when COMP_CWORD is absent',
     await rm(configDir, { recursive: true, force: true });
   }
 });
+
+test('completion script: zsh output self-initializes compsys and registers compdef', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [binPath, 'completion'], {
+    env: { ...process.env, SHELL: '/bin/zsh' },
+  });
+
+  assert.match(stdout, /###-begin-wtshunt-completions-###/);
+  assert.match(stdout, /###-end-wtshunt-completions-###/);
+  assert.match(stdout, /autoload -Uz compinit/);
+  assert.match(stdout, /compinit/);
+  assert.match(stdout, /compdef _wtshunt_yargs_completions wtshunt/);
+  assert.match(stdout, /wtshunt --get-yargs-completions "\$\{words\[@\]\}"/);
+  // Upstream yargs has a stray quote here ("'${zsh_eval_context...").
+  assert.doesNotMatch(stdout, /"'\$\{zsh_eval_context/);
+});
+
+test('completion script: bash output uses complete -F with no init guard', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [binPath, 'completion'], {
+    env: { ...process.env, SHELL: '/bin/bash' },
+  });
+
+  assert.match(stdout, /###-begin-wtshunt-completions-###/);
+  assert.match(stdout, /###-end-wtshunt-completions-###/);
+  assert.match(stdout, /complete -o bashdefault -o default -F _wtshunt_yargs_completions wtshunt/);
+  assert.doesNotMatch(stdout, /compinit/);
+});
+
+test('completion script: the hidden completion-script command does not appear in --help', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [binPath, '--help']);
+  assert.match(stdout, /wtshunt completion\s/);
+  assert.doesNotMatch(stdout, /completion-script/);
+});
