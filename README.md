@@ -161,13 +161,15 @@ non-zero with a warning (see Limitations).
 Starts the reverse proxy on the repo's `fixed_port`, in the foreground;
 stop it with `Ctrl-C`. Every request is forwarded to whatever worktree is
 currently active, re-read from disk on every request — so `wtshunt use`
-takes effect on the very next request, with the proxy left running.
-Responses (including error responses) carry an `X-Wtshunt-Worktree`
-header naming the worktree that handled (or failed to handle) the
-request. If the active worktree has no server running, the proxy returns
-`502` with a hint to run `wtshunt serve`. If `fixed_port` is already in
-use when starting, it prints the process occupying it (via `lsof`) and
-exits. The proxy speaks plain HTTP only — see Limitations.
+takes effect on the very next new connection, with the proxy left
+running. Responses (including error responses) carry an
+`X-Wtshunt-Worktree` header naming the worktree that handled (or failed
+to handle) the request. If the active worktree has no server running,
+the proxy returns `502` with a hint to run `wtshunt serve`. If
+`fixed_port` is already in use when starting, it prints the process
+occupying it (via `lsof`) and exits. WebSocket and other Upgrade
+requests are forwarded too — see Limitations for how that interacts
+with `use`.
 
 ### `wtshunt help [command]`
 
@@ -176,10 +178,15 @@ command's own help (equivalent to `wtshunt <command> --help`).
 
 ## Limitations and troubleshooting
 
-- **No WebSockets.** The proxy forwards plain HTTP requests only;
-  upgrade requests (Rails ActionCable, Vite/webpack HMR sockets) are
-  dropped. Point long-lived sockets directly at the worktree's own port,
-  or keep them off the proxied path.
+- **WebSockets route on connect, not on switch.** An Upgrade request
+  (Rails ActionCable, Vite/webpack HMR) is forwarded to whichever
+  worktree is active at the moment it's opened, but an already-open
+  connection doesn't move if `use` changes the active worktree
+  afterward — only the next new connection picks it up. In practice
+  this is rarely noticeable: ActionCable and HMR clients reconnect on
+  their own, and land on the new worktree the moment they do. The 101
+  handshake response is relayed as-is, so it does not carry an
+  `X-Wtshunt-Worktree` header the way ordinary HTTP responses do.
 - **`status` reports process liveness, not reachability.** A server
   that failed to bind where wtshunt expected — wrong port flag, wrong
   interface — still shows as running while the proxy answers 502. When
