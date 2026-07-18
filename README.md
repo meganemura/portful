@@ -105,6 +105,11 @@ has no server running, the proxy returns `502` with a hint to run
 `wtshunt serve`. If `fixed_port` is already in use when starting, it
 prints the process occupying it (via `lsof`) and exits.
 
+### `wtshunt help [command]`
+
+Shows the same thing as `wtshunt --help`; with a command name, shows that
+command's own help (equivalent to `wtshunt <command> --help`).
+
 ## Shell completion
 
 `wtshunt completion` prints a completion script for the shell that's

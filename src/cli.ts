@@ -181,106 +181,155 @@ const repoPositional = (y: Argv) =>
     describe: 'repo, or repo/worktree to target directly',
   });
 
-await yargs(hideBin(process.argv))
-  .scriptName('wtshunt')
-  .locale('en')
-  .command(
-    'use [repo]',
-    'Select the active worktree for a repo',
-    repoPositional,
-    handle(async (argv) => {
-      await useCommand({ repo: argv.repo as string | undefined });
+const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'help', 'completion'];
+
+// Extracted so `help` can build a second, independent yargs instance and
+// re-parse `[command, '--help']` (or just `['--help']`) through it (see the
+// `help` command below) without disturbing the instance driving the current
+// invocation. `rawArgs` is threaded through explicitly (rather than each
+// command reading `process.argv` directly) specifically so `run`'s handler
+// — which reads raw argv rather than yargs' parsed result, see below — sees
+// the same args this instance was built with, including when `help run`
+// builds a second instance with a synthesized `['run', '--help']`.
+function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
+  return yargs(rawArgs)
+    .scriptName('wtshunt')
+    .locale('en')
+    .command(
+      'use [repo]',
+      'Select the active worktree for a repo',
+      repoPositional,
+      handle(async (argv) => {
+        await useCommand({ repo: argv.repo as string | undefined });
+      })
+    )
+    .command(
+      'serve [repo]',
+      'Start a server for the active (or given) worktree in the foreground',
+      repoPositional,
+      handle(async (argv) => {
+        await serveCommand({ repo: argv.repo as string | undefined });
+      })
+    )
+    .command(
+      'run [target] [cmd..]',
+      'Run a command inside a worktree (flags are passed through untouched)',
+      // Disables this command's own --help/--version so a flag meant for the
+      // wrapped command (e.g. `wtshunt run b rails s -h`) reaches it instead
+      // of being swallowed by yargs. Other commands are unaffected.
+      (y) => y.help(false).version(false),
+      handle(async () => {
+        // Read raw argv rather than yargs' parsed result: yargs-parser still
+        // splits flags like `-p 3105` out of the positional array internally,
+        // but since runCommand ignores that parse entirely, it doesn't matter.
+        // Uses `rawArgs` (this instance's own args), not `process.argv`
+        // directly, so `wtshunt help run` — which builds a second instance
+        // with `rawArgs = ['run', '--help']` — reaches the same '--help'
+        // short-circuit a direct `wtshunt run --help` would.
+        await runCommand(rawArgs.slice(1));
+      })
+    )
+    .command(
+      'status',
+      'Show active worktrees, running servers, and proxy state',
+      () => {},
+      handle(async () => {
+        await statusCommand();
+      })
+    )
+    .command(
+      'stop [repo]',
+      'Stop the server for the active (or given) worktree',
+      repoPositional,
+      handle(async (argv) => {
+        await stopCommand({ repo: argv.repo as string | undefined });
+      })
+    )
+    .command(
+      'proxy [repo]',
+      'Start the reverse proxy for a repo in the foreground',
+      repoPositional,
+      handle(async (argv) => {
+        await proxyCommand({ repo: argv.repo as string | undefined });
+      })
+    )
+    .command(
+      'help [command]',
+      'Show help, optionally for a specific command',
+      (y) => y.positional('command', { type: 'string', describe: 'command to show help for' }),
+      handle(async (argv) => {
+        const target = argv.command as string | undefined;
+        // A fresh instance rather than reusing the current one: yargs
+        // instances carry parse state, and `--help` here should exit through
+        // the exact same help/exit path a real `<command> --help` would.
+        // Passed to buildCli() itself (not `.parse()`) so `run`'s handler,
+        // which reads this instance's own `rawArgs`, sees it too.
+        //
+        // An unknown target is deliberately NOT given `--help`: yargs' own
+        // --help flag takes priority over its "unknown command" validation
+        // (confirmed: `wtshunt nosuchcmd --help` exits 0 with plain help,
+        // same as a bare `--help`), which would silently turn "help
+        // <unknown>" into a success instead of the same error a bare
+        // `wtshunt <unknown>` produces.
+        let args: string[];
+        if (target === undefined) {
+          args = ['--help'];
+        } else if (COMMAND_NAMES.includes(target)) {
+          args = [target, '--help'];
+        } else {
+          args = [target];
+        }
+        await buildCli(args).parse();
+      })
+    )
+    .command(
+      'completion',
+      'Generate a shell completion script',
+      () => {},
+      handle(async () => {
+        console.log(generateCompletionScript());
+      })
+    )
+    // Registered under a hidden name (description: false keeps it out of
+    // --help) rather than the default 'completion', so that name is free for
+    // our own `completion` command above to print our own script instead of
+    // yargs' built-in one. This only affects what command name shows the
+    // script; the `--get-yargs-completions` flag our script actually invokes
+    // is a separate, always-on mechanism unaffected by this rename.
+    .completion('completion-script', false, async () => {
+      const { positionals, current } = completionContext();
+      if (positionals.length === 0) {
+        return COMMAND_NAMES;
+      }
+      const command = positionals[0];
+      if (command === 'help') {
+        return COMMAND_NAMES.filter((name) => name !== 'help');
+      }
+      if (command === 'use' || command === 'serve' || command === 'stop' || command === 'proxy' || command === 'run') {
+        return completeRepoOrWorktree(current);
+      }
+      return [];
     })
-  )
-  .command(
-    'serve [repo]',
-    'Start a server for the active (or given) worktree in the foreground',
-    repoPositional,
-    handle(async (argv) => {
-      await serveCommand({ repo: argv.repo as string | undefined });
+    .demandCommand(1, 'Please specify a command.')
+    .strictCommands()
+    .fail((msg, err, yargsInstance) => {
+      if (err) {
+        // A real thrown Error (not a yargs parsing/validation failure). Every
+        // command handler already catches and reports its own errors via
+        // handle(), so this only fires for errors thrown outside that path
+        // (e.g. during argument coercion).
+        reportError(err);
+        return;
+      }
+      // yargs' own validation failure (no command, unknown command, bad
+      // option, ...). A custom .fail() handler replaces yargs' default
+      // behavior entirely, including the help text it would otherwise print,
+      // so show it back here rather than leaving the user with just `msg`.
+      yargsInstance.showHelp();
+      console.error(`\n${msg}`);
+      process.exitCode = 1;
     })
-  )
-  .command(
-    'run [target] [cmd..]',
-    'Run a command inside a worktree (flags are passed through untouched)',
-    // Disables this command's own --help/--version so a flag meant for the
-    // wrapped command (e.g. `wtshunt run b rails s -h`) reaches it instead
-    // of being swallowed by yargs. Other commands are unaffected.
-    (y) => y.help(false).version(false),
-    handle(async () => {
-      // Read raw argv rather than yargs' parsed result: yargs-parser still
-      // splits flags like `-p 3105` out of the positional array internally,
-      // but since runCommand ignores that parse entirely, it doesn't matter.
-      await runCommand(hideBin(process.argv).slice(1));
-    })
-  )
-  .command(
-    'status',
-    'Show active worktrees, running servers, and proxy state',
-    () => {},
-    handle(async () => {
-      await statusCommand();
-    })
-  )
-  .command(
-    'stop [repo]',
-    'Stop the server for the active (or given) worktree',
-    repoPositional,
-    handle(async (argv) => {
-      await stopCommand({ repo: argv.repo as string | undefined });
-    })
-  )
-  .command(
-    'proxy [repo]',
-    'Start the reverse proxy for a repo in the foreground',
-    repoPositional,
-    handle(async (argv) => {
-      await proxyCommand({ repo: argv.repo as string | undefined });
-    })
-  )
-  .command(
-    'completion',
-    'Generate a shell completion script',
-    () => {},
-    handle(async () => {
-      console.log(generateCompletionScript());
-    })
-  )
-  // Registered under a hidden name (description: false keeps it out of
-  // --help) rather than the default 'completion', so that name is free for
-  // our own `completion` command above to print our own script instead of
-  // yargs' built-in one. This only affects what command name shows the
-  // script; the `--get-yargs-completions` flag our script actually invokes
-  // is a separate, always-on mechanism unaffected by this rename.
-  .completion('completion-script', false, async () => {
-    const { positionals, current } = completionContext();
-    if (positionals.length === 0) {
-      return ['use', 'serve', 'run', 'status', 'stop', 'proxy'];
-    }
-    const command = positionals[0];
-    if (command === 'use' || command === 'serve' || command === 'stop' || command === 'proxy' || command === 'run') {
-      return completeRepoOrWorktree(current);
-    }
-    return [];
-  })
-  .demandCommand(1, 'Please specify a command.')
-  .strictCommands()
-  .fail((msg, err, yargsInstance) => {
-    if (err) {
-      // A real thrown Error (not a yargs parsing/validation failure). Every
-      // command handler already catches and reports its own errors via
-      // handle(), so this only fires for errors thrown outside that path
-      // (e.g. during argument coercion).
-      reportError(err);
-      return;
-    }
-    // yargs' own validation failure (no command, unknown command, bad
-    // option, ...). A custom .fail() handler replaces yargs' default
-    // behavior entirely, including the help text it would otherwise print,
-    // so show it back here rather than leaving the user with just `msg`.
-    yargsInstance.showHelp();
-    console.error(`\n${msg}`);
-    process.exitCode = 1;
-  })
-  .help()
-  .parse();
+    .help();
+}
+
+await buildCli().parse();

@@ -62,7 +62,16 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
   try {
     // "wtshunt <Tab>": rest = [wtshunt] (zsh omits the not-yet-started, empty
     // current word), COMP_CWORD=1 points one past the end of rest.
-    assert.deepEqual(await getCompletions(configDir, [], 1), ['use', 'serve', 'run', 'status', 'stop', 'proxy']);
+    assert.deepEqual(await getCompletions(configDir, [], 1), [
+      'use',
+      'serve',
+      'run',
+      'status',
+      'stop',
+      'proxy',
+      'help',
+      'completion',
+    ]);
 
     // "wtshunt use <Tab>": rest = [wtshunt, use], COMP_CWORD=2.
     const afterUse = await getCompletions(configDir, ['use'], 2);
@@ -85,7 +94,7 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
     // "wtshunt <Tab>": rest = [wtshunt, ''] (bash always appends the current
     // word, empty or not), COMP_CWORD=1 points at that empty element.
     const topLevel = await getCompletions(configDir, [''], 1);
-    assert.deepEqual(topLevel, ['use', 'serve', 'run', 'status', 'stop', 'proxy']);
+    assert.deepEqual(topLevel, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'help', 'completion']);
 
     // "wtshunt use <Tab>": rest = [wtshunt, use, ''], COMP_CWORD=2.
     const afterUse = await getCompletions(configDir, ['use', ''], 2);
@@ -109,6 +118,46 @@ test('completion: falls back to last-word-is-current when COMP_CWORD is absent',
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });
   }
+});
+
+test('completion: after "help", suggests command names (excluding help itself)', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    const afterHelp = await getCompletions(configDir, ['help'], 2);
+    assert.deepEqual(afterHelp, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'completion']);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('help: shows the same output as top-level --help', async () => {
+  const [{ stdout: helpOut }, { stdout: topLevelOut }] = await Promise.all([
+    execFileAsync(process.execPath, [binPath, 'help']),
+    execFileAsync(process.execPath, [binPath, '--help']),
+  ]);
+  assert.equal(helpOut, topLevelOut);
+  assert.match(helpOut, /wtshunt use \[repo\]/);
+});
+
+test('help <command>: shows that command\'s own help', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [binPath, 'help', 'use']);
+  assert.match(stdout, /Select the active worktree for a repo/);
+});
+
+test('help run: shows run\'s own usage synopsis', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [binPath, 'help', 'run']);
+  assert.match(stdout, /Usage: wtshunt run \[repo\[\/worktree\]\] <cmd\.\.\.>/);
+});
+
+test('help <unknown command>: fails the same way a bare unknown command would', async () => {
+  await assert.rejects(
+    () => execFileAsync(process.execPath, [binPath, 'help', 'nosuchcmd']),
+    (err: NodeJS.ErrnoException & { stderr?: string }) => {
+      assert.match(String(err.stderr), /Unknown command: nosuchcmd/);
+      return true;
+    }
+  );
 });
 
 test('completion script: zsh output self-initializes compsys and registers compdef', async () => {
