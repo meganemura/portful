@@ -1,5 +1,7 @@
 # wtshunt
 
+[日本語版](README.ja.md)
+
 `wtshunt` lets one service (say, a frontend dev server) keep hitting a
 fixed port for a backend (say, a Rails app) while you juggle several git
 worktrees of that backend at once. Each worktree gets its own backend
