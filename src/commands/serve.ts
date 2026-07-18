@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { loadConfig } from '../config.ts';
-import { allocatePort } from '../ports.ts';
+import { allocatePort, findPortOccupant } from '../ports.ts';
 import { resolveRepo, listWorktrees, findWorktree } from '../repo.ts';
 import { ensureRepoState, readState, withState } from '../state.ts';
 
@@ -81,10 +81,19 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   child.on('exit', (code, signal) => {
     void (async () => {
       if (Date.now() - startedAt < EARLY_EXIT_THRESHOLD_MS) {
-        console.error(
-          'Hint: the server exited very quickly. Check whether .env or node_modules ' +
-            'have been copied into this worktree.'
-        );
+        // Distinguish "something else is squatting the assigned port" (the
+        // sticky/allocated port can be stolen between allocation and the
+        // child's own bind) from the more common missing-.env/node_modules
+        // crash, rather than always guessing the latter.
+        const occupant = await findPortOccupant(port);
+        if (occupant) {
+          console.error(`Hint: port ${port} is held by another process:\n${occupant}`);
+        } else {
+          console.error(
+            'Hint: the server exited very quickly. Check whether .env or node_modules ' +
+              'have been copied into this worktree.'
+          );
+        }
       }
 
       await withState((s) => {

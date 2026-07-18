@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:net';
-import { allocatePort } from '../src/ports.ts';
+import { allocatePort, isPortFree } from '../src/ports.ts';
 
-function listenOn(port: number): Promise<Server> {
+function listenOn(port: number, host = '0.0.0.0'): Promise<Server> {
   return new Promise((resolvePromise, reject) => {
     const server = createServer();
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => resolvePromise(server));
+    server.listen(port, host, () => resolvePromise(server));
   });
 }
 
@@ -62,4 +62,19 @@ test('ports: throws when no free port is available in range', async () => {
   } finally {
     await closeServer(blocker);
   }
+});
+
+test('ports: isPortFree reports false for a port held on 0.0.0.0', async () => {
+  const blocker = await listenOn(40450, '0.0.0.0');
+  try {
+    assert.equal(await isPortFree(40450), false);
+  } finally {
+    await closeServer(blocker);
+  }
+});
+
+test('ports: isPortFree reports true once the port is released', async () => {
+  const blocker = await listenOn(40451, '0.0.0.0');
+  await closeServer(blocker);
+  assert.equal(await isPortFree(40451), true);
 });

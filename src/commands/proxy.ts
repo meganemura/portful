@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { loadConfig } from '../config.ts';
+import { findPortOccupant } from '../ports.ts';
 import { resolveRepo } from '../repo.ts';
 import { ensureRepoState, removeProxyEntrySync, withState } from '../state.ts';
 import { startProxy } from '../proxy.ts';
-
-const execFileAsync = promisify(execFile);
 
 export interface ProxyArgs {
   repo?: string;
@@ -68,13 +65,4 @@ export async function proxyCommand(args: ProxyArgs): Promise<void> {
       removeProxyEntrySync(repoName, process.pid);
     }
   });
-}
-
-async function findPortOccupant(port: number): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync('lsof', ['-i', `:${port}`, '-sTCP:LISTEN']);
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
 }
