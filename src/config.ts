@@ -113,6 +113,13 @@ function validateRepoConfig(name: string, value: unknown, configPath: string): R
   if (typeof v.serve !== 'string' || v.serve.length === 0) {
     throw new Error(`repos.${name}.serve is required and must be a string in ${configPath}`);
   }
+  if (!v.serve.includes('{port}')) {
+    throw new Error(
+      `repos.${name}.serve must contain the literal placeholder "{port}" in ${configPath}. ` +
+        `Without it, the server won't bind the port wtshunt assigned, and "wtshunt status" and the proxy ` +
+        `will have no way to know which port it actually ended up on.`
+    );
+  }
 
   return {
     path: resolve(expandTilde(v.path)),

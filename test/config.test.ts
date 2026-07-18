@@ -99,6 +99,36 @@ test('config: missing required key throws a validation error', async () => {
   }
 });
 
+test('config: serve template missing {port} throws a validation error', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-no-port-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.b]',
+        'path = "/tmp/b"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "bundle exec rails s"',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /\{port\}/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
 test('config: malformed port_range throws a validation error', async () => {
   const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-invalid-range-'));
   try {
