@@ -4,6 +4,9 @@ import { loadConfig } from './config.ts';
 import { listWorktrees } from './repo.ts';
 import { serveCommand } from './commands/serve.ts';
 import { runCommand } from './commands/run.ts';
+import { useCommand } from './commands/use.ts';
+import { statusCommand } from './commands/status.ts';
+import { stopCommand } from './commands/stop.ts';
 
 async function completeRepoOrWorktree(current: string): Promise<string[]> {
   let config;
@@ -102,7 +105,14 @@ if (bypassArgs[0] === 'run') {
 await yargs(hideBin(process.argv))
   .scriptName('wtshunt')
   .locale('en')
-  .command('use [repo]', 'Select the active worktree for a repo', repoPositional, handle(notImplemented('use')))
+  .command(
+    'use [repo]',
+    'Select the active worktree for a repo',
+    repoPositional,
+    handle(async (argv) => {
+      await useCommand({ repo: argv.repo as string | undefined });
+    })
+  )
   .command(
     'serve [repo]',
     'Start a server for the active (or given) worktree in the foreground',
@@ -122,8 +132,22 @@ await yargs(hideBin(process.argv))
       await runCommand(hideBin(process.argv).slice(1));
     })
   )
-  .command('status', 'Show active worktrees, running servers, and proxy state', () => {}, handle(notImplemented('status')))
-  .command('stop [repo]', 'Stop the server for the active (or given) worktree', repoPositional, handle(notImplemented('stop')))
+  .command(
+    'status',
+    'Show active worktrees, running servers, and proxy state',
+    () => {},
+    handle(async () => {
+      await statusCommand();
+    })
+  )
+  .command(
+    'stop [repo]',
+    'Stop the server for the active (or given) worktree',
+    repoPositional,
+    handle(async (argv) => {
+      await stopCommand({ repo: argv.repo as string | undefined });
+    })
+  )
   .command(
     'proxy [repo]',
     'Start the reverse proxy for a repo in the foreground',
