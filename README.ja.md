@@ -22,6 +22,7 @@ direnv やシェルの alias のようなディレクトリ単位のツールが
 - worktree に `cd` せずに単発コマンドを実行: `wtshunt run`
 - プロキシの向き先 worktree を切り替え: `wtshunt use`
 - 全 worktree の稼働状況を一覧: `wtshunt status`
+- 関連する複数リポジトリの worktree をまとめて切り替え: `wtshunt task`
 
 ## これが不要な人
 
@@ -60,14 +61,14 @@ npm link
 mkdir -p ~/.config/wtshunt && $EDITOR ~/.config/wtshunt/config.toml
 
 # 2. worktree ごとにサーバを温める — ターミナルのタブを分けてフォアグラウンドで
-wtshunt serve b/feature-auth
-wtshunt serve b/feature-perf     # 別のタブで
+wtshunt serve api/feature-x
+wtshunt serve api/feature-y      # 別のタブで
 
 # 3. 固定ポートにプロキシを立てる(さらに別のタブ、これもフォアグラウンド)
-wtshunt proxy b
+wtshunt proxy api
 
 # 4. 固定ポートの向き先を好きなタイミングで切り替える
-wtshunt use b                    # ピッカーが開き、次のリクエストから反映
+wtshunt use api                  # ピッカーが開き、次のリクエストから反映
 ```
 
 プロキシはオプトインです。起動していないあいだは `fixed_port` を何も
@@ -76,15 +77,21 @@ wtshunt use b                    # ピッカーが開き、次のリクエスト
 ## 設定
 
 設定ファイルは `$XDG_CONFIG_HOME/wtshunt/config.toml`(未設定なら
-`~/.config/wtshunt/config.toml`)。バックエンドのリポジトリごとに
-`[repos.<name>]` テーブルを1つ定義します:
+`~/.config/wtshunt/config.toml`)。リポジトリごとに `[repos.<name>]`
+テーブルを1つ定義します:
 
 ```toml
-[repos.b]
-path = "~/work/b"             # リポジトリ本体のチェックアウトのパス
-fixed_port = 3000              # フロントエンドが常に叩くポート
+[repos.api]
+path = "~/work/api"           # リポジトリ本体のチェックアウトのパス
+fixed_port = 3000              # 他のサービスが常に叩くポート
 port_range = [3101, 3199]      # 各 worktree に割り当てるポートの範囲
 serve = "bundle exec rails s -p {port}"
+
+[repos.front]
+path = "~/work/front"
+fixed_port = 8080
+port_range = [8101, 8199]
+serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
 ```
 
 - `path` はリポジトリ本体のチェックアウトを指し、`~` 展開が使えます。
@@ -98,6 +105,11 @@ serve = "bundle exec rails s -p {port}"
   場合は設定の読み込み自体が失敗します — これが無いとサーバはフレーム
   ワークのデフォルトポートで起動する一方、`status` とプロキシは割り当て
   ポートにいると思い込んだままになるためです。
+- `serve` は `{port:<repo>}` で別の登録済みリポジトリのポートも参照
+  できます — 上の `front` のテンプレートは `{port:api}` を `api` の
+  アクティブ worktree が使っているポートに解決し、まだ割り当てが無け
+  れば新たに割り当てます。これが複数リポジトリの worktree を結びつけ
+  る仕組みです。詳しくは下の「タスク」を参照してください。
 - 一度 `wtshunt serve` されたことのある worktree は、再起動しても同じ
   ポートを使い続けます(sticky 割り当て)。割り当て時にポートの占有を
   検知した場合のみ、`port_range` 内の次の空きポートが使われます。この
@@ -106,7 +118,8 @@ serve = "bundle exec rails s -p {port}"
   ますが、すり抜けるケースは残ります(「制約とトラブルシューティング」
   参照)。
 
-設定ファイルが無い場合、`wtshunt` は上の例を表示して終了します。
+設定ファイルが無い場合、`wtshunt` は上の `api` テーブルのような単一
+リポジトリの例を表示して終了します。
 
 ## コマンド
 
@@ -137,18 +150,19 @@ peco、無ければ番号選択のプロンプトです。プロキシが稼働�
 ### `wtshunt run [repo[/worktree]] <cmd...>`
 
 worktree のディレクトリの中で任意のコマンドを実行します。自分で `cd`
-する必要はありません — たとえば `wtshunt run b bin/rails console`、
+する必要はありません — たとえば `wtshunt run api bin/rails console`、
 そのリポジトリの中にいるなら単に `wtshunt run bin/rails console` と
 書けます。内側のコマンドのフラグは一切加工されずに素通しされます
 (`run` については `wtshunt` はオプションパースを一切しません)。
-`wtshunt run b bin/rails s -p 3105` は手で実行したのと完全に同じよう
-に動きます。
+`wtshunt run api bin/rails s -p 3105` は手で実行したのと完全に同じ
+ように動きます。
 
 ### `wtshunt status`
 
 設定済みの各リポジトリについて、アクティブな worktree、稼働中の全
 サーバ(worktree、ブランチ、ポート、pid)、プロキシの稼働状況と現在の
-転送先を表示します。
+転送先を表示し、続けて定義済みの各タスクとそのメンバーを一覧します
+(現在のアクティブ worktree と一致するタスクには `*` が付きます)。
 
 ### `wtshunt stop [repo]`
 
@@ -173,10 +187,76 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 転送します — `use` との関係は「制約とトラブルシューティング」を参照
 してください。
 
+### `wtshunt task add|use|list|rm`
+
+リポジトリごとに1つの worktree を束ねた名前付きプリセット「タスク」
+を管理します。これにより関連する複数リポジトリを一度に切り替えられ
+ます。詳しくは下の「タスク」を参照してください。
+
+- `wtshunt task add <name> [repo/worktree ...]` はタスクを作成します。
+  明示的に指定したリポジトリはその worktree を使い、指定しなかった
+  登録済みリポジトリはそれぞれについて選択を促されます(peco、無けれ
+  ば番号選択。先頭に「このリポジトリをタスクに含めない」選択肢があり
+  ます)。
+- `wtshunt task use <name>` はまず全メンバーの worktree がまだ存在す
+  るか検証し、1つでも欠けていれば何も適用せずエラーにします。検証後、
+  全メンバーを一括で切り替え、どのメンバーがまだ `wtshunt serve` され
+  ていないかを報告し、起動中のサーバの `{port:<repo>}` の結線が古く
+  なっていないかも警告します(「タスク」参照)。
+- `wtshunt task list` はタスクとそのメンバーを一覧し、全メンバーが
+  現在のアクティブ worktree と一致するタスクには `*` を付けます。
+- `wtshunt task rm <name>` はタスクを削除します。
+
 ### `wtshunt help [command]`
 
 `wtshunt --help` と同じ内容を表示します。コマンド名を付けると、その
 コマンド自体のヘルプ(`wtshunt <command> --help` 相当)を表示します。
+
+## タスク
+
+変更が複数リポジトリにまたがるようになると、単一リポジトリの worktree
+だけでは足りません — たとえば `api` のあるブランチと、それを呼ぶ
+`front` のブランチのような組み合わせです。**タスク**はリポジトリごとに
+1つの worktree を束ねた名前付きプリセットで、グループ全体をまとめて
+切り替えられます:
+
+```sh
+wtshunt task add feature-x api/feature-x front/feature-x
+wtshunt task use feature-x
+```
+
+`task add` はリポジトリを明示しなければそれぞれについて選択を促し
+(タスクから外すこともできます)、`task use` は全メンバーのアクティブ
+worktree を一度に適用したうえで、どのメンバーにまだ `wtshunt serve` が
+必要か、どのリポジトリのプロキシが(何もしなくても)追従するかを報告
+します(プロキシは常通り次のリクエストで state を読み直すだけです)。
+
+**リポジトリ同士がどう結線され続けるか。** サービスの手前に立つ固定
+ポートのプロキシはリクエストごとに `state.json` を読み直すため、その
+部分は常に現在アクティブな worktree を反映します — 再起動は不要です。
+一方 `serve` テンプレートの `{port:<repo>}` 参照は違います: これは
+サーバ起動時に実行される具体的なシェルコマンドへ一度だけ置換される
+ため、そのプロセスが動き続けている限り固定されたままです。`api` の
+アクティブ worktree を切り替えても、すでに動いている `front` のプロ
+セスの接続先は自動的には変わりません — 再起動するまで `api` の古い
+ポートを叩き続けます。これはまさに `task use` がチェックしている内容
+です: `{port:<repo>}` の結線がもう一致しないサーバが動いていれば、
+`wtshunt stop <repo> && wtshunt serve <repo>` で結線し直すよう警告し
+ます。まだ一度も動いていない worktree は、初めて `serve` したときに
+自動的に正しい結線になります。
+
+`front` にも `API_URL` を含むコミット済みの `.env` がある場合、`serve`
+テンプレートの `API_URL={port:api}` プレフィックスが優先されるのは、
+使っているフレームワークの `.env` ローダーが既に設定済みの環境変数を
+上書きしない実装である場合に限ります — ほとんどの dotenv 実装のデフ
+ォルト挙動ではありますが、自分のスタックで一度確認しておく価値はあり
+ます。
+
+プロキシの host:port は切り替えても変わらないため、クライアントが
+持っている Cookie はそのまま引き継がれます。それが表すセッションが
+有効なままかどうかは、関係する worktree 同士がセッションストアを共有
+しているかどうか次第です — 下の開発用データベース共有の注記を参照し
+てください。
 
 ## 制約とトラブルシューティング
 
@@ -219,14 +299,17 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 や worktree を後から追加しても、再インストールなしで即座に補完されます:
 
 - 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、
-  `status`、`stop`、`proxy`、`help`、`completion`)を提案します。
+  `status`、`stop`、`proxy`、`task`、`help`、`completion`)を提案します。
 - `use`、`serve`、`stop`、`proxy`、`run` の第1引数では、すべての
   リポジトリ名と `repo/worktree` 名を提案します。`run <Tab>` で全候補
-  が並び、`run b/<Tab>` で `b` の worktree に絞り込まれます。`help` の
-  引数ではコマンド名を提案します。
+  が並び、`run api/<Tab>` で `api` の worktree に絞り込まれます。
+  `help` の引数ではコマンド名を提案します。
+- `task` の後は `add`/`use`/`list`/`rm` を、`task use` や `task rm` の
+  後は定義済みのタスク名を提案します。`task add <name>` の後は、
+  `run` などと同じ repo/worktree の候補にフォールバックします。
 - それ以外 — どのリポジトリ・worktree にも前方一致しない語
   (例: `run rails<Tab>`)や、どのコマンドでも第2引数以降
-  (例: `run b bin/<Tab>`)— では意図的に候補を返しません。これに
+  (例: `run api bin/<Tab>`)— では意図的に候補を返しません。これに
   よりシェルは通常のファイル/コマンド補完にフォールバックし、決して
   当てはまらない worktree 名を提案し続けることがなくなります。
 
@@ -261,9 +344,11 @@ npm test        # node:test。テストが実際の設定や state に触れる�
 ビルドステップはありません — CLI は tsx 経由で `src/` の TypeScript を
 直接実行します。`src/commands/*.ts` が各サブコマンドのハンドラで、
 `src/proxy.ts` がリバースプロキシの実装本体です(`src/commands/proxy.ts`
-はその薄い CLI ラッパー)。実行時の state は
-`$XDG_STATE_HOME/wtshunt/state.json`(デフォルトは
-`~/.local/state/wtshunt/state.json`)に置かれます。
+はその薄い CLI ラッパー)。`src/portRefs.ts` が `{port:<repo>}` の解決、
+`src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、
+`src/picker.ts` が `use` と `task add` で共有する peco/番号選択の
+ピッカーです。実行時の state は `$XDG_STATE_HOME/wtshunt/state.json`
+(デフォルトは `~/.local/state/wtshunt/state.json`)に置かれます。
 
 ## ライセンス
 

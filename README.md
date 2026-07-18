@@ -22,6 +22,7 @@ exists for.
 - Run one-off commands inside a worktree without `cd`-ing there: `wtshunt run`
 - Flip which worktree the proxy points at: `wtshunt use`
 - See what's running across every worktree: `wtshunt status`
+- Switch a whole group of related repos' worktrees together: `wtshunt task`
 
 ## When you don't need this
 
@@ -59,14 +60,14 @@ anything, run `./bin/wtshunt.js <command>` directly from the checkout.
 mkdir -p ~/.config/wtshunt && $EDITOR ~/.config/wtshunt/config.toml
 
 # 2. Warm one server per worktree — one terminal tab each, in the foreground
-wtshunt serve b/feature-auth
-wtshunt serve b/feature-perf     # in another tab
+wtshunt serve api/feature-x
+wtshunt serve api/feature-y      # in another tab
 
 # 3. Put the proxy on the fixed port (another tab, also foreground)
-wtshunt proxy b
+wtshunt proxy api
 
 # 4. Flip the fixed port between worktrees at will
-wtshunt use b                    # opens the picker; applies on the next request
+wtshunt use api                  # opens the picker; applies on the next request
 ```
 
 The proxy is opt-in: when it isn't running, nothing occupies
@@ -76,14 +77,20 @@ The proxy is opt-in: when it isn't running, nothing occupies
 
 Config lives at `$XDG_CONFIG_HOME/wtshunt/config.toml`, falling back to
 `~/.config/wtshunt/config.toml`. Define one `[repos.<name>]` table per
-backend repo:
+repo:
 
 ```toml
-[repos.b]
-path = "~/work/b"             # path to the repo's main checkout
-fixed_port = 3000              # the port the frontend always talks to
-port_range = [3101, 3199]      # ports handed out to individual worktrees
+[repos.api]
+path = "~/work/api"            # path to the repo's main checkout
+fixed_port = 3000               # the port other services always talk to
+port_range = [3101, 3199]       # ports handed out to individual worktrees
 serve = "bundle exec rails s -p {port}"
+
+[repos.front]
+path = "~/work/front"
+fixed_port = 8080
+port_range = [8101, 8199]
+serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
 ```
 
 - `path` points at the repo's main checkout and supports `~` expansion.
@@ -97,6 +104,11 @@ serve = "bundle exec rails s -p {port}"
   without it the server would bind whatever port your framework
   defaults to while `status` and the proxy keep believing it's on the
   assigned one.
+- `serve` can also reference another registered repo's port with
+  `{port:<repo>}` — `front`'s template above resolves `{port:api}` to
+  whatever port `api`'s active worktree is using, allocating one if it
+  doesn't have one yet. This is what lets multiple repos' worktrees stay
+  wired together; see Tasks below for the full workflow.
 - Each worktree that ever gets a `wtshunt serve` keeps the same port
   across restarts (a "sticky" assignment), unless wtshunt finds the
   port occupied at assignment time, in which case the next free port in
@@ -105,7 +117,8 @@ serve = "bundle exec rails s -p {port}"
   which interface it bound — see Limitations for what it still can't
   catch.
 
-If the config file is missing, `wtshunt` prints this example and exits.
+If the config file is missing, `wtshunt` prints a single-repo example
+like the `api` table above and exits.
 
 ## Commands
 
@@ -136,17 +149,19 @@ it cleanly.
 ### `wtshunt run [repo[/worktree]] <cmd...>`
 
 Runs an arbitrary command inside a worktree's directory, without `cd`-ing
-there yourself — e.g. `wtshunt run b bin/rails console` or, from inside
-that repo already, just `wtshunt run bin/rails console`. Flags on the
-inner command are passed through completely untouched (`wtshunt` does no
-option parsing at all for `run`), so `wtshunt run b bin/rails s -p 3105`
-works exactly as if you'd run it by hand.
+there yourself — e.g. `wtshunt run api bin/rails console` or, from
+inside that repo already, just `wtshunt run bin/rails console`. Flags on
+the inner command are passed through completely untouched (`wtshunt`
+does no option parsing at all for `run`), so
+`wtshunt run api bin/rails s -p 3105` works exactly as if you'd run it
+by hand.
 
 ### `wtshunt status`
 
 Shows, for every configured repo: the active worktree, every running
 server (worktree, branch, port, pid), and whether the proxy is running
-and what it's currently routing to.
+and what it's currently routing to — followed by every defined task and
+its members, marked with `*` if it matches the current active worktrees.
 
 ### `wtshunt stop [repo]`
 
@@ -171,10 +186,74 @@ occupying it (via `lsof`) and exits. WebSocket and other Upgrade
 requests are forwarded too — see Limitations for how that interacts
 with `use`.
 
+### `wtshunt task add|use|list|rm`
+
+Manages named presets — "tasks" — that bundle one worktree per repo, so
+a whole related group of repos can switch together in one command. See
+Tasks below for the full workflow.
+
+- `wtshunt task add <name> [repo/worktree ...]` creates a task. Repos
+  named explicitly use the given worktree; every other registered repo
+  gets prompted for (peco, or a numbered picker, with a leading option
+  to leave that repo out of the task entirely).
+- `wtshunt task use <name>` validates every member's worktree still
+  exists — if even one doesn't, nothing is applied — then switches all
+  of them at once. Reports which members have no server running yet,
+  and warns about any already-running server whose `{port:<repo>}`
+  wiring no longer matches (see Tasks).
+- `wtshunt task list` lists tasks and their members, marking with `*`
+  any task whose members all match the current active worktrees.
+- `wtshunt task rm <name>` removes a task.
+
 ### `wtshunt help [command]`
 
 Shows the same thing as `wtshunt --help`; with a command name, shows that
 command's own help (equivalent to `wtshunt <command> --help`).
+
+## Tasks
+
+A single repo's worktrees only get you so far once a change spans more
+than one repo — say, an `api` branch and the `front` branch that talks
+to it. A **task** is a named preset that bundles one worktree per repo,
+so the whole group switches together:
+
+```sh
+wtshunt task add feature-x api/feature-x front/feature-x
+wtshunt task use feature-x
+```
+
+`task add` with no repo named explicitly prompts for each one (or lets
+you leave it out of the task); `task use` applies every member's active
+worktree in a single step, then reports which members still need
+`wtshunt serve` and whether any repo's proxy needs nothing further (it
+just re-reads state on the next request, as always).
+
+**How repos actually stay wired together.** The fixed-port proxy in
+front of a service re-reads `state.json` on every request, so *that*
+part always reflects whichever worktree is currently active — no
+restart needed. A `serve` template's `{port:<repo>}` reference is
+different: it's substituted once, into the literal shell command run
+when that server starts, so it's fixed for as long as that process
+keeps running. Switching `api`'s active worktree doesn't retroactively
+change what an already-running `front` process is connected to — it
+keeps talking to `api`'s old port until you restart it. This is exactly
+what `task use` checks for: if a server is still running with
+`{port:<repo>}` wiring that no longer matches, it prints a warning
+telling you to `wtshunt stop <repo> && wtshunt serve <repo>` to pick up
+the new one. A worktree that was never running in the first place picks
+up the correct wiring automatically the first time you `serve` it.
+
+If `front` also has a checked-in `.env` with its own `API_URL`, the
+`API_URL={port:api}` prefix in the `serve` template only wins if your
+framework's `.env` loader treats already-set environment variables as
+authoritative and doesn't overwrite them — the common default for most
+dotenv implementations, but worth confirming once for your stack.
+
+Because the proxy's host:port never changes across a switch, any
+cookies your client already holds carry over automatically. Whether the
+session they represent stays valid depends on whether the worktrees
+involved share a session store — see the shared-dev-database note
+below.
 
 ## Limitations and troubleshooting
 
@@ -219,15 +298,19 @@ newly added repos or worktrees complete right away without reinstalling
 anything:
 
 - With nothing typed yet, it suggests command names (`use`, `serve`,
-  `run`, `status`, `stop`, `proxy`, `help`, `completion`).
+  `run`, `status`, `stop`, `proxy`, `task`, `help`, `completion`).
 - As the first argument to `use`, `serve`, `stop`, `proxy`, or `run`, it
   suggests every repo name and every `repo/worktree` name, so
-  `run <Tab>` lists them all and `run b/<Tab>` narrows to worktrees of
-  `b`. As the argument to `help`, it suggests command names instead.
+  `run <Tab>` lists them all and `run api/<Tab>` narrows to worktrees of
+  `api`. As the argument to `help`, it suggests command names instead.
+- After `task`, it suggests `add`/`use`/`list`/`rm`; after `task use` or
+  `task rm`, it suggests defined task names. After `task add <name>`, it
+  falls through to the same repo/worktree suggestions as `run` and the
+  rest.
 - Anywhere else — a prefix that matches no repo or worktree (e.g.
   `run rails<Tab>`), or the second argument onward for any command (e.g.
-  `run b bin/<Tab>`) — it deliberately returns no matches, which lets the
-  shell fall back to its normal file/command completion instead of
+  `run api bin/<Tab>`) — it deliberately returns no matches, which lets
+  the shell fall back to its normal file/command completion instead of
   getting stuck offering worktree names that can never apply.
 
 zsh:
@@ -261,8 +344,11 @@ npm test        # node:test; the suite never touches your real config or state
 There is no build step — the CLI runs the TypeScript in `src/` directly
 via tsx. `src/commands/*.ts` hold one subcommand handler each;
 `src/proxy.ts` is the reverse-proxy implementation itself
-(`src/commands/proxy.ts` is its thin CLI wrapper). Runtime state lives in
-`$XDG_STATE_HOME/wtshunt/state.json` (default
+(`src/commands/proxy.ts` is its thin CLI wrapper). `src/portRefs.ts`
+resolves `{port:<repo>}` references, `src/tasks.ts` holds the wiring-
+mismatch and task-matching logic, and `src/picker.ts` is the peco/
+numbered-prompt picker shared by `use` and `task add`. Runtime state
+lives in `$XDG_STATE_HOME/wtshunt/state.json` (default
 `~/.local/state/wtshunt/state.json`).
 
 ## License
