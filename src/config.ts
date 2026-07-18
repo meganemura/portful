@@ -10,8 +10,19 @@ export interface RepoConfig {
   serve: string;
 }
 
+/** Optional `[ui]` section configuring how `wtshunt ui` opens serve/proxy panes. */
+export interface UiConfig {
+  /**
+   * Shell template overriding multiplexer auto-detection (herdr, then tmux),
+   * e.g. `cmux run --name {title} {cmd}`. Substitutes `{title}`, `{cmd}`, and
+   * `{cwd}`, each shell-quoted, then runs the result with `sh -c`.
+   */
+  open?: string;
+}
+
 export interface Config {
   repos: Record<string, RepoConfig>;
+  ui?: UiConfig;
 }
 
 const SAMPLE_CONFIG = `[repos.api]
@@ -84,7 +95,23 @@ function validateConfig(parsed: unknown, configPath: string): Config {
     throw new Error(`No repos defined in ${configPath}.\n\nExample:\n\n${SAMPLE_CONFIG}`);
   }
 
-  return { repos };
+  const uiRaw = (parsed as Record<string, unknown>).ui;
+  const ui = uiRaw !== undefined ? validateUiConfig(uiRaw, configPath) : undefined;
+
+  return ui !== undefined ? { repos, ui } : { repos };
+}
+
+function validateUiConfig(value: unknown, configPath: string): UiConfig {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error(`ui must be a table in ${configPath}`);
+  }
+  const v = value as Record<string, unknown>;
+
+  if (v.open !== undefined && (typeof v.open !== 'string' || v.open.length === 0)) {
+    throw new Error(`ui.open must be a non-empty string in ${configPath}`);
+  }
+
+  return v.open !== undefined ? { open: v.open as string } : {};
 }
 
 function validateRepoConfig(name: string, value: unknown, configPath: string): RepoConfig {
