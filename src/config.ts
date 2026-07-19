@@ -20,9 +20,20 @@ export interface UiConfig {
   open?: string;
 }
 
+/** Optional `[picker]` section configuring how `use`/`task add` prompt for a worktree. */
+export interface PickerConfig {
+  /**
+   * Shell command overriding picker auto-detection (peco, then fzf), e.g.
+   * `fzf --height 40% --reverse`. Candidate lines are written to its stdin
+   * and the selected line is read from its stdout, run with `sh -c`.
+   */
+  command?: string;
+}
+
 export interface Config {
   repos: Record<string, RepoConfig>;
   ui?: UiConfig;
+  picker?: PickerConfig;
 }
 
 const SAMPLE_CONFIG = `[repos.api]
@@ -104,7 +115,14 @@ function validateConfig(parsed: unknown, configPath: string): Config {
   const uiRaw = (parsed as Record<string, unknown>).ui;
   const ui = uiRaw !== undefined ? validateUiConfig(uiRaw, configPath) : undefined;
 
-  return ui !== undefined ? { repos, ui } : { repos };
+  const pickerRaw = (parsed as Record<string, unknown>).picker;
+  const picker = pickerRaw !== undefined ? validatePickerConfig(pickerRaw, configPath) : undefined;
+
+  return {
+    repos,
+    ...(ui !== undefined ? { ui } : {}),
+    ...(picker !== undefined ? { picker } : {}),
+  };
 }
 
 function validateUiConfig(value: unknown, configPath: string): UiConfig {
@@ -118,6 +136,19 @@ function validateUiConfig(value: unknown, configPath: string): UiConfig {
   }
 
   return v.open !== undefined ? { open: v.open as string } : {};
+}
+
+function validatePickerConfig(value: unknown, configPath: string): PickerConfig {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error(`picker must be a table in ${configPath}`);
+  }
+  const v = value as Record<string, unknown>;
+
+  if (v.command !== undefined && (typeof v.command !== 'string' || v.command.length === 0)) {
+    throw new Error(`picker.command must be a non-empty string in ${configPath}`);
+  }
+
+  return v.command !== undefined ? { command: v.command as string } : {};
 }
 
 function validateRepoConfig(name: string, value: unknown, configPath: string): RepoConfig {

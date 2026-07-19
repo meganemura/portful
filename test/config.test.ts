@@ -190,6 +190,87 @@ test('config: a template with only {<repo>.port} and no bare {port} still fails 
   }
 });
 
+test('config: [picker].command parses when present, and is absent when the section is omitted', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-picker-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.b]',
+        'path = "/tmp/b"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[picker]',
+        'command = "fzf --height 40% --reverse"',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      const config = await loadConfig();
+      assert.equal(config.picker?.command, 'fzf --height 40% --reverse');
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
+test('config: no [picker] section leaves picker undefined', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-no-picker-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      ['[repos.b]', 'path = "/tmp/b"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
+        '\n'
+      )
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      const config = await loadConfig();
+      assert.equal(config.picker, undefined);
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
+test('config: an empty [picker].command fails validation', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-picker-empty-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.b]',
+        'path = "/tmp/b"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[picker]',
+        'command = ""',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /picker\.command/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
 test('config: malformed port_range throws a validation error', async () => {
   const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-invalid-range-'));
   try {
