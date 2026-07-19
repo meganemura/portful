@@ -221,8 +221,9 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
  * Stands in for the real `herdr` binary in the `herdrMux.open()` tests
  * below (which — unlike the `.detect()` test above — do exercise `.open()`,
  * but only ever against this stand-in, never the real `herdr`). Understands
- * just enough of `agent start`/`pane list`/`pane neighbor`/`pane swap` to
- * drive `herdrMux`'s placement logic:
+ * just enough of `agent start`/`pane list`/`pane neighbor`/`pane swap`/
+ * `pane layout`/`pane focus` to drive `herdrMux`'s placement and
+ * focus-restore logic:
  *
  * - `agent start ...` appends a log line, then either echoes back
  *   `$STUB_AGENT_START_STDOUT` verbatim (for simulating a malformed
@@ -247,10 +248,21 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
  *   then pops the next boolean off `$STUB_SWAP_QUEUE` and exits 0 (success)
  *   or 1 (failure) accordingly — an empty queue defaults to failure, so an
  *   under-scripted test fails loudly instead of silently "succeeding".
+ * - `pane layout --pane <id>` appends a log line, then pops the next entry
+ *   off `$STUB_LAYOUT_QUEUE`: a string responds with that pane id as
+ *   `result.layout.focused_pane_id`; `null` responds with
+ *   `{"result":{"layout":{}}}` (field present in shape but missing);
+ *   `"BAD_JSON"` writes non-JSON stdout instead. An empty queue exits 1
+ *   (simulating a herdr CLI failure) — same under-scripted-fails-loudly
+ *   convention as `pane swap`.
+ * - `pane focus --direction <dir> --pane <id>` appends a log line, then
+ *   pops the next boolean off `$STUB_FOCUS_QUEUE` and exits 0 (success) or 1
+ *   (failure) accordingly — an empty queue defaults to failure.
  *
- * Tests drive scenarios by writing `$STUB_NEIGHBOR_QUEUE`/`$STUB_SWAP_QUEUE`
- * before each `open()` call and by rewriting the state file directly (e.g.
- * to simulate the user closing a pane between two `open()` calls).
+ * Tests drive scenarios by writing `$STUB_NEIGHBOR_QUEUE`/`$STUB_SWAP_QUEUE`/
+ * `$STUB_LAYOUT_QUEUE`/`$STUB_FOCUS_QUEUE` before each `open()` call and by
+ * rewriting the state file directly (e.g. to simulate the user closing a
+ * pane between two `open()` calls).
  */
 async function writeHerdrStub(dir: string): Promise<string> {
   const stubPath = join(dir, 'herdr-stub.cjs');
@@ -356,6 +368,33 @@ if (argv[0] === 'pane' && argv[1] === 'swap') {
   process.exit(0);
 }
 
+if (argv[0] === 'pane' && argv[1] === 'layout') {
+  log();
+  const popped = popQueue('STUB_LAYOUT_QUEUE');
+  if (!popped.present) {
+    process.exit(1);
+  }
+  const entry = popped.value;
+  if (entry === 'BAD_JSON') {
+    process.stdout.write('not json');
+    process.exit(0);
+  }
+  const layout = entry === null || entry === undefined ? {} : { focused_pane_id: entry };
+  process.stdout.write(JSON.stringify({ id: 'cli:pane:layout', result: { layout } }));
+  process.exit(0);
+}
+
+if (argv[0] === 'pane' && argv[1] === 'focus') {
+  log();
+  const popped = popQueue('STUB_FOCUS_QUEUE');
+  const success = popped.present ? Boolean(popped.value) : false;
+  if (!success) {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify({ id: 'cli:pane:focus', result: { type: 'pane_focus' } }));
+  process.exit(0);
+}
+
 process.exit(1);
 `;
   await writeFile(stubPath, script);
@@ -404,6 +443,8 @@ const HERDR_OPEN_TEST_ENV_KEYS = [
   'STUB_PANE_LIST_FAIL',
   'STUB_NEIGHBOR_QUEUE',
   'STUB_SWAP_QUEUE',
+  'STUB_LAYOUT_QUEUE',
+  'STUB_FOCUS_QUEUE',
 ] as const;
 
 type HerdrOpenTestEnv = Partial<Record<(typeof HERDR_OPEN_TEST_ENV_KEYS)[number], string>>;
@@ -426,23 +467,35 @@ function restoreHerdrOpenTestEnv(saved: HerdrOpenTestEnv): void {
   }
 }
 
-/** Sets up a fresh stub binary, log file, empty pane-list state, and empty neighbor/swap response queues; returns everything a test needs to drive `herdrMux.open()`. */
-async function setUpHerdrOpenTest(
-  dir: string
-): Promise<{ herdrBin: string; logFile: string; stateFile: string; neighborQueueFile: string; swapQueueFile: string }> {
+/** Sets up a fresh stub binary, log file, empty pane-list state, and empty neighbor/swap/layout/focus response queues; returns everything a test needs to drive `herdrMux.open()`. */
+async function setUpHerdrOpenTest(dir: string): Promise<{
+  herdrBin: string;
+  logFile: string;
+  stateFile: string;
+  neighborQueueFile: string;
+  swapQueueFile: string;
+  layoutQueueFile: string;
+  focusQueueFile: string;
+}> {
   const herdrBin = await writeHerdrStub(dir);
   const logFile = join(dir, 'log.jsonl');
   const stateFile = join(dir, 'state.json');
   const neighborQueueFile = join(dir, 'neighbor-queue.json');
   const swapQueueFile = join(dir, 'swap-queue.json');
+  const layoutQueueFile = join(dir, 'layout-queue.json');
+  const focusQueueFile = join(dir, 'focus-queue.json');
   await writeFile(stateFile, '[]');
   await writeFile(neighborQueueFile, '[]');
   await writeFile(swapQueueFile, '[]');
+  await writeFile(layoutQueueFile, '[]');
+  await writeFile(focusQueueFile, '[]');
   process.env.STUB_LOG = logFile;
   process.env.STUB_STATE = stateFile;
   process.env.STUB_NEIGHBOR_QUEUE = neighborQueueFile;
   process.env.STUB_SWAP_QUEUE = swapQueueFile;
-  return { herdrBin, logFile, stateFile, neighborQueueFile, swapQueueFile };
+  process.env.STUB_LAYOUT_QUEUE = layoutQueueFile;
+  process.env.STUB_FOCUS_QUEUE = focusQueueFile;
+  return { herdrBin, logFile, stateFile, neighborQueueFile, swapQueueFile, layoutQueueFile, focusQueueFile };
 }
 
 /** Scripts the stub's next `pane neighbor` (or `pane swap`) responses, in call order. */
@@ -725,6 +778,171 @@ test('herdrMux.open: when `pane list` fails, only its cleanup is skipped — age
     const neighbors = callsMatching(calls, 'pane', 'neighbor');
     assert.equal(neighbors.length, 1, 'placement still proceeds off HERDR_PANE_ID despite the failed cleanup call');
     assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Sets up a two-`open()`-call scenario in which the second call's
+ * `bubbleIntoPlace` swaps exactly once, so `herdrMux.open` should follow up
+ * with a `restoreFocus` walk. Callers script `layoutQueueFile`/
+ * `focusQueueFile` afterward to drive that walk, then invoke the returned
+ * `runSecondOpen` to perform it and inspect the log.
+ */
+async function setUpOneSwapScenario(dir: string): Promise<{
+  logFile: string;
+  layoutQueueFile: string;
+  focusQueueFile: string;
+  runSecondOpen: () => Promise<void>;
+}> {
+  const { herdrBin, logFile, neighborQueueFile, swapQueueFile, layoutQueueFile, focusQueueFile } = await setUpHerdrOpenTest(dir);
+  process.env.HERDR_PANE_ID = 'w1:p1';
+  process.env.HERDR_TAB_ID = 'w1:t1';
+
+  const mux = herdrMux({ herdrBin });
+
+  // First open: lands in place with no swaps, tracked as order 0's pane.
+  process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+  await writeQueue(neighborQueueFile, ['w1:p1']);
+  await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+  // Second open: anchors on order 0's pane (w1:p2), one position further
+  // right than where `--split right` actually landed it — exactly one swap,
+  // same as test (c) above.
+  return {
+    logFile,
+    layoutQueueFile,
+    focusQueueFile,
+    runSecondOpen: async () => {
+      process.env.STUB_NEXT_PANE_ID = 'w1:p3';
+      await writeQueue(neighborQueueFile, ['w1:p1', 'w1:p2', 'w1:p2']);
+      await writeQueue(swapQueueFile, [true]);
+      await mux.open({ title: 'second', command: 'echo 2', order: 5 });
+    },
+  };
+}
+
+test('herdrMux.open: restoreFocus (a) walks focus left one step at a time until `pane layout` reports the ui pane', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { logFile, layoutQueueFile, focusQueueFile, runSecondOpen } = await setUpOneSwapScenario(dir);
+
+    // The swap left focus on the newly-opened pane (w1:p3): first layout
+    // call reports it, so `pane focus --direction left --pane w1:p3` moves
+    // focus one step further left; the next layout call reports the ui pane
+    // (w1:p1) itself, so the walk stops there.
+    await writeQueue(layoutQueueFile, ['w1:p3', 'w1:p1']);
+    await writeQueue(focusQueueFile, [true]);
+    await runSecondOpen();
+
+    const calls = await readStubLog(logFile);
+    const layouts = callsMatching(calls, 'pane', 'layout');
+    assert.equal(layouts.length, 2);
+    assert.equal(paneArgOf(layouts[0]), 'w1:p1', 'layout is always queried against the ui pane, not the focused one');
+    assert.equal(paneArgOf(layouts[1]), 'w1:p1');
+
+    const focuses = callsMatching(calls, 'pane', 'focus');
+    assert.equal(focuses.length, 1);
+    assert.equal(directionOf(focuses[0]), 'left');
+    assert.equal(paneArgOf(focuses[0]), 'w1:p3', 'focus steps left of whichever pane layout reported as focused');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: restoreFocus (b) is never invoked when bubbling needed no swaps', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, neighborQueueFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PANE_ID = 'w1:p1';
+    process.env.HERDR_TAB_ID = 'w1:t1';
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await writeQueue(neighborQueueFile, ['w1:p1']); // already in place, right of ui — no swap
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
+    assert.equal(callsMatching(calls, 'pane', 'layout').length, 0);
+    assert.equal(callsMatching(calls, 'pane', 'focus').length, 0);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: restoreFocus (c) is skipped when HERDR_PANE_ID is unset, even if a swap ran', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, neighborQueueFile, swapQueueFile } = await setUpHerdrOpenTest(dir);
+    delete process.env.HERDR_PANE_ID; // wtshunt ui wasn't itself started from a herdr pane
+    process.env.HERDR_TAB_ID = 'w1:t1';
+
+    const mux = herdrMux({ herdrBin });
+
+    // First open: nothing tracked yet and no HERDR_PANE_ID, so basePaneId is
+    // undefined — bubbleIntoPlace is skipped entirely, no swap.
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    // Second open anchors on order 0's tracked pane (w1:p2) — an anchor that
+    // comes from `openedPanes`, not HERDR_PANE_ID — and swaps once to get
+    // there.
+    process.env.STUB_NEXT_PANE_ID = 'w1:p3';
+    await writeQueue(neighborQueueFile, ['w1:pother', 'w1:pright', 'w1:p2']);
+    await writeQueue(swapQueueFile, [true]);
+    await mux.open({ title: 'second', command: 'echo 2', order: 5 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 1, 'sanity check: a swap really did happen');
+    assert.equal(callsMatching(calls, 'pane', 'layout').length, 0, 'no ui pane to walk focus back to');
+    assert.equal(callsMatching(calls, 'pane', 'focus').length, 0);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: restoreFocus (d) gives up at the 8-step cap when layout never reports the ui pane', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { logFile, layoutQueueFile, focusQueueFile, runSecondOpen } = await setUpOneSwapScenario(dir);
+
+    await writeQueue(layoutQueueFile, Array(8).fill('w1:pstuck')); // never the ui pane
+    await writeQueue(focusQueueFile, Array(8).fill(true));
+    await runSecondOpen();
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'layout').length, 8);
+    const focuses = callsMatching(calls, 'pane', 'focus');
+    assert.equal(focuses.length, 8);
+    assert.ok(focuses.every((c) => directionOf(c) === 'left' && paneArgOf(c) === 'w1:pstuck'));
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: restoreFocus (e) stops without calling focus when `pane layout`\'s stdout is not JSON', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { logFile, layoutQueueFile, runSecondOpen } = await setUpOneSwapScenario(dir);
+
+    await writeQueue(layoutQueueFile, ['BAD_JSON']);
+    await runSecondOpen();
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'layout').length, 1);
+    assert.equal(callsMatching(calls, 'pane', 'focus').length, 0);
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });

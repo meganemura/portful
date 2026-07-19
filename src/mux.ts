@@ -244,19 +244,110 @@ const MAX_BUBBLE_SWAPS = 16;
  *      it's at the right edge — stop (nothing left to swap past).
  *   3. `pane swap` the new pane with that right neighbor, then repeat from
  *      1 — the new pane is now one position further right.
+ *
+ * Returns whether at least one swap actually ran. Confirmed by hands-on
+ * testing, `pane swap --source-pane <a> --target-pane <b>` moves focus to
+ * `a` as a side effect of swapping — here, always the new pane — so the
+ * return value tells the caller whether focus needs restoring afterward
+ * (see `restoreFocus`). Zero swaps means focus was never touched.
  */
-async function bubbleIntoPlace(herdrBin: string, newPaneId: string, basePaneId: string): Promise<void> {
+async function bubbleIntoPlace(herdrBin: string, newPaneId: string, basePaneId: string): Promise<boolean> {
+  let swapped = false;
   for (let i = 0; i < MAX_BUBBLE_SWAPS; i++) {
     const left = await herdrPaneNeighbor(herdrBin, 'left', newPaneId);
     if (left === undefined || left.paneId === basePaneId) {
-      return;
+      return swapped;
     }
     const right = await herdrPaneNeighbor(herdrBin, 'right', newPaneId);
     if (right === undefined || right.paneId === undefined) {
+      return swapped;
+    }
+    const didSwap = await herdrPaneSwap(herdrBin, newPaneId, right.paneId);
+    if (!didSwap) {
+      return swapped;
+    }
+    swapped = true;
+  }
+  return swapped;
+}
+
+/** Upper bound on `restoreFocus`'s walk-left loop, so a herdr response that never satisfies its stop condition can't spin forever. */
+const MAX_FOCUS_RESTORE_STEPS = 8;
+
+/**
+ * Runs `herdr pane layout --pane <paneId>` and returns
+ * `.result.layout.focused_pane_id` — the id of whichever pane currently has
+ * focus within `paneId`'s tab (confirmed by hands-on testing: `paneId` need
+ * not itself be the focused pane — any pane in the tab reports the same tab
+ * -wide focus). `undefined` on any failure: nonzero exit, unparseable
+ * stdout, or the field missing/non-string — the same "give up silently"
+ * signal used throughout this module.
+ */
+async function herdrPaneLayout(herdrBin: string, paneId: string): Promise<string | undefined> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'layout', '--pane', paneId]));
+  } catch {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(stdout) as { result?: { layout?: { focused_pane_id?: unknown } } };
+    const focusedPaneId = parsed.result?.layout?.focused_pane_id;
+    return typeof focusedPaneId === 'string' ? focusedPaneId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Runs `herdr pane focus --direction <direction> --pane <paneId>`, which
+ * moves focus to whatever pane sits immediately in that direction from
+ * `paneId` — confirmed by hands-on testing to focus `paneId`'s *neighbor*,
+ * never `paneId` itself. Returns `false` on any failure (nonzero exit or
+ * unparseable stdout).
+ */
+async function herdrPaneFocus(herdrBin: string, direction: 'left' | 'right' | 'up' | 'down', paneId: string): Promise<boolean> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'focus', '--direction', direction, '--pane', paneId]));
+  } catch {
+    return false;
+  }
+  try {
+    JSON.parse(stdout);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Walks focus back to `uiPaneId` (`wtshunt ui`'s own pane) after a
+ * `bubbleIntoPlace` swap stole it — see that function's doc comment for why
+ * a swap moves focus at all. There's no herdr API to focus a pane by id
+ * directly (`agent focus <pane_id>` only works for agent panes, and
+ * `uiPaneId` isn't one), so this walks there one step at a time instead:
+ *
+ *   1. `pane layout --pane uiPaneId` reports the tab's currently-focused
+ *      pane. Already `uiPaneId`? Done — stop.
+ *   2. `pane focus --direction left --pane <that focused pane>` moves focus
+ *      one step further left (to *its* left neighbor, not to itself), then
+ *      repeat from 1.
+ *
+ * Capped at `MAX_FOCUS_RESTORE_STEPS` iterations. Any failure along the way
+ * — an unparseable/incomplete `pane layout` response, or a failed `pane
+ * focus` call — silently stops the walk wherever it is, same "give up,
+ * don't guess" policy as the rest of this module: focus just stays put
+ * instead of landing back on the ui pane.
+ */
+async function restoreFocus(herdrBin: string, uiPaneId: string): Promise<void> {
+  for (let i = 0; i < MAX_FOCUS_RESTORE_STEPS; i++) {
+    const focusedPaneId = await herdrPaneLayout(herdrBin, uiPaneId);
+    if (focusedPaneId === undefined || focusedPaneId === uiPaneId) {
       return;
     }
-    const swapped = await herdrPaneSwap(herdrBin, newPaneId, right.paneId);
-    if (!swapped) {
+    const moved = await herdrPaneFocus(herdrBin, 'left', focusedPaneId);
+    if (!moved) {
       return;
     }
   }
@@ -317,6 +408,20 @@ async function bubbleIntoPlace(herdrBin: string, newPaneId: string, basePaneId: 
  * etc.) so it can never be picked as an anchor again — if `pane list`
  * itself fails, only that cleanup is skipped; placement still proceeds
  * against whatever `openedPanes` already held.
+ *
+ * A third pitfall, also confirmed by hands-on testing: `pane swap` moves
+ * focus to its `--source-pane` as a side effect of swapping. `bubbleIntoPlace`
+ * always calls it with the new pane as source, so a swap silently drags
+ * focus off wherever the user actually was (e.g. `wtshunt ui`'s own pane) and
+ * onto the pane that was just opened — reported by a user opening `api` then
+ * `front`, where opening `front` moved focus there (one swap ran); an order
+ * requiring zero swaps never showed the bug. Since a swap only *sometimes*
+ * runs, focus is only *sometimes* disturbed, so it's only restored when
+ * `bubbleIntoPlace` reports it actually swapped at least once — see
+ * `restoreFocus`'s doc comment for how it walks focus back to `HERDR_PANE_ID`
+ * (the ui pane). Left untouched when nothing swapped, or when
+ * `HERDR_PANE_ID` isn't set (this `wtshunt ui` wasn't itself started from a
+ * herdr pane, so there's nothing to walk back to).
  */
 export function herdrMux(options: HerdrMuxOptions = {}): Mux {
   const herdrBin = options.herdrBin ?? 'herdr';
@@ -378,12 +483,23 @@ export function herdrMux(options: HerdrMuxOptions = {}): Mux {
         basePaneId = process.env.HERDR_PANE_ID;
       }
 
+      let didSwap = false;
       if (basePaneId !== undefined) {
-        await bubbleIntoPlace(herdrBin, newPaneId, basePaneId);
+        didSwap = await bubbleIntoPlace(herdrBin, newPaneId, basePaneId);
       }
 
       if (order !== undefined) {
         openedPanes.set(order, newPaneId);
+      }
+
+      // A swap moves focus to its source (the new pane) as a side effect —
+      // only restore it if bubbling actually swapped at least once, and only
+      // if there's a ui pane to walk focus back to.
+      if (didSwap) {
+        const uiPaneId = process.env.HERDR_PANE_ID;
+        if (uiPaneId !== undefined) {
+          await restoreFocus(herdrBin, uiPaneId);
+        }
       }
     },
   };
