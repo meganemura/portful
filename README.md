@@ -75,6 +75,26 @@ wtshunt proxy api
 wtshunt use api                  # opens the picker; applies on the next request
 ```
 
+The same flow as a diagram — the second request lands on feature-y
+without anything being restarted:
+
+```mermaid
+sequenceDiagram
+    participant C as client (always :3000)
+    participant P as wtshunt proxy (:3000)
+    participant X as api/feature-x (:3101)
+    participant Y as api/feature-y (:3102)
+    Note over X,Y: both kept running by wtshunt serve
+    C->>P: GET /todos
+    P->>X: forward (active: feature-x)
+    Note over C,Y: $ wtshunt use api/feature-y — flips the active pointer
+    C->>P: GET /todos
+    P->>Y: forward (active is re-read on every request)
+```
+
+The diagram shows ordinary HTTP requests; a WebSocket connection is
+routed once, when it is opened — see Limitations.
+
 The proxy is opt-in: when it isn't running, nothing occupies
 `fixed_port`, and every other command keeps working the same way.
 

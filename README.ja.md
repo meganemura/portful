@@ -64,6 +64,26 @@ wtshunt proxy api
 wtshunt use api                  # ピッカーが開き、次のリクエストから反映
 ```
 
+同じ流れを図にすると、次のようになります。
+2回目のリクエストは、何も再起動せずに feature-y に届きます:
+
+```mermaid
+sequenceDiagram
+    participant C as クライアント (常に :3000)
+    participant P as wtshunt プロキシ (:3000)
+    participant X as api/feature-x (:3101)
+    participant Y as api/feature-y (:3102)
+    Note over X,Y: どちらも wtshunt serve で起動済み
+    C->>P: GET /todos
+    P->>X: 転送 (アクティブ: feature-x)
+    Note over C,Y: $ wtshunt use api/feature-y — アクティブを切り替え
+    C->>P: GET /todos
+    P->>Y: 転送 (転送先はリクエストごとに読み直し)
+```
+
+この図は通常の HTTP リクエストの場合です。
+WebSocket 接続は、開いたときに一度だけルーティングされます(「制約とトラブルシューティング」参照)。
+
 プロキシは使うときだけ起動すれば十分です。
 起動していないあいだは `fixed_port` を何も占有せず、他のコマンドはそれまで通りに動きます。
 
