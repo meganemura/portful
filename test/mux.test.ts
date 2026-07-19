@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
+  cmuxArgs,
+  cmuxMux,
   fallbackMessage,
   fallbackMux,
   herdrMux,
@@ -22,28 +24,31 @@ const execFileAsync = promisify(execFile);
 
 const EMPTY_CONFIG: Config = { repos: {} };
 
-interface SavedEnv {
-  HERDR_ENV?: string;
-  HERDR_SOCKET_PATH?: string;
-  TMUX?: string;
-}
+const MUX_ENV_KEYS = ['HERDR_ENV', 'HERDR_SOCKET_PATH', 'CMUX_SOCKET_PATH', 'CMUX_WORKSPACE_ID', 'TMUX'] as const;
 
+type SavedEnv = Partial<Record<(typeof MUX_ENV_KEYS)[number], string>>;
+
+// This dev environment genuinely runs inside both a live herdr session and a
+// live cmux session (their env vars are really set), so every test below
+// must explicitly clear whichever of these it doesn't want detected —
+// leaving one set "by ambient accident" would silently change which
+// adapter resolveMux picks.
 function saveMuxEnv(): SavedEnv {
-  return {
-    HERDR_ENV: process.env.HERDR_ENV,
-    HERDR_SOCKET_PATH: process.env.HERDR_SOCKET_PATH,
-    TMUX: process.env.TMUX,
-  };
+  const saved: SavedEnv = {};
+  for (const key of MUX_ENV_KEYS) {
+    saved[key] = process.env[key];
+  }
+  return saved;
 }
 
 function clearMuxEnv(): void {
-  delete process.env.HERDR_ENV;
-  delete process.env.HERDR_SOCKET_PATH;
-  delete process.env.TMUX;
+  for (const key of MUX_ENV_KEYS) {
+    delete process.env[key];
+  }
 }
 
 function restoreMuxEnv(saved: SavedEnv): void {
-  for (const key of ['HERDR_ENV', 'HERDR_SOCKET_PATH', 'TMUX'] as const) {
+  for (const key of MUX_ENV_KEYS) {
     if (saved[key] === undefined) {
       delete process.env[key];
     } else {
@@ -56,6 +61,7 @@ test('resolveMux: an [ui] open template always wins, even with herdr/tmux env se
   const saved = saveMuxEnv();
   try {
     process.env.HERDR_ENV = '1';
+    process.env.CMUX_WORKSPACE_ID = 'workspace-1';
     process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
     const mux = resolveMux({ repos: {}, ui: { open: 'echo {cmd}' } });
     assert.equal(mux.name, 'template');
@@ -64,11 +70,12 @@ test('resolveMux: an [ui] open template always wins, even with herdr/tmux env se
   }
 });
 
-test('resolveMux: herdr wins over tmux when no template is configured', () => {
+test('resolveMux: herdr wins over cmux and tmux when no template is configured', () => {
   const saved = saveMuxEnv();
   try {
     clearMuxEnv();
     process.env.HERDR_SOCKET_PATH = '/tmp/does-not-matter.sock';
+    process.env.CMUX_WORKSPACE_ID = 'workspace-1';
     process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
     const mux = resolveMux(EMPTY_CONFIG);
     assert.equal(mux.name, 'herdr');
@@ -77,7 +84,7 @@ test('resolveMux: herdr wins over tmux when no template is configured', () => {
   }
 });
 
-test('resolveMux: tmux wins when $TMUX is set and herdr is not detected', () => {
+test('resolveMux: tmux wins when $TMUX is set and neither herdr nor cmux is detected', () => {
   const saved = saveMuxEnv();
   try {
     clearMuxEnv();
@@ -99,6 +106,38 @@ test('resolveMux: falls back when nothing is detected and no template is configu
     restoreMuxEnv(saved);
   }
 });
+
+async function realCmuxOnPath(): Promise<boolean> {
+  try {
+    // `which` merely checks $PATH — unlike invoking `cmux` itself, this
+    // can't touch its socket.
+    await execFileAsync('which', ['cmux']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const hasCmux = await realCmuxOnPath();
+
+test(
+  'resolveMux: cmux wins over tmux when detected and no herdr/template (never invokes the real cmux binary)',
+  { skip: !hasCmux ? 'cmux is not installed' : false },
+  () => {
+    const saved = saveMuxEnv();
+    try {
+      clearMuxEnv();
+      process.env.CMUX_SOCKET_PATH = '/tmp/does-not-matter.sock';
+      process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
+      // resolveMux() itself only calls .detect() here, never .open() — this
+      // test never runs the actual cmux binary.
+      const mux = resolveMux(EMPTY_CONFIG);
+      assert.equal(mux.name, 'cmux');
+    } finally {
+      restoreMuxEnv(saved);
+    }
+  }
+);
 
 test('shQuote: leaves safe tokens bare, quotes and escapes everything else', () => {
   assert.equal(shQuote('api/feature-x'), 'api/feature-x');
@@ -176,6 +215,62 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
   // Deliberately never calls .open() here: a real herdr session/pane must
   // never be started or opened by this test suite, per the hard constraint
   // that only a real end user verifies herdr on their own machine.
+});
+
+test('cmuxArgs: builds new-workspace with --name/--cwd/--command and --focus false', () => {
+  assert.deepEqual(cmuxArgs({ title: 'api/feature-x', command: 'echo hi', cwd: '/tmp/x' }), [
+    'new-workspace',
+    '--name',
+    'api/feature-x',
+    '--cwd',
+    '/tmp/x',
+    '--command',
+    'echo hi',
+    '--focus',
+    'false',
+  ]);
+});
+
+test('cmuxArgs: omits --cwd when none is given', () => {
+  assert.deepEqual(cmuxArgs({ title: 'demo', command: 'echo hi' }), [
+    'new-workspace',
+    '--name',
+    'demo',
+    '--command',
+    'echo hi',
+    '--focus',
+    'false',
+  ]);
+});
+
+test('cmuxMux: detects only when a CMUX_* env var is set AND the binary resolves on $PATH, never invokes it', () => {
+  const saved = saveMuxEnv();
+  try {
+    clearMuxEnv();
+
+    // No env vars at all, even with a real, always-on-PATH binary standing
+    // in for cmux.
+    assert.equal(cmuxMux({ cmuxBin: 'ls' }).detect(), false);
+
+    // Env var set, but the "binary" doesn't resolve on $PATH.
+    process.env.CMUX_SOCKET_PATH = '/tmp/whatever.sock';
+    assert.equal(cmuxMux({ cmuxBin: 'wtshunt-definitely-not-a-real-binary-xyz' }).detect(), false);
+
+    // Env var set and the stand-in binary does resolve.
+    assert.equal(cmuxMux({ cmuxBin: 'ls' }).detect(), true);
+
+    delete process.env.CMUX_SOCKET_PATH;
+    process.env.CMUX_WORKSPACE_ID = 'workspace-1';
+    assert.equal(cmuxMux({ cmuxBin: 'ls' }).detect(), true);
+  } finally {
+    restoreMuxEnv(saved);
+  }
+  // Deliberately never calls .open() with the real 'cmux' binary anywhere in
+  // this suite: this dev environment is a genuine, live cmux session (its
+  // CMUX_SOCKET_PATH/CMUX_WORKSPACE_ID are really set), and a sandboxed
+  // invocation of the real binary is known to fail against its socket
+  // ("Failed to write to socket (Broken pipe)") — never opening a real
+  // workspace is a hard requirement, not just an artifact to avoid.
 });
 
 async function tmuxAvailable(): Promise<boolean> {

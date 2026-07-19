@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { resolve } from 'node:path';
+import { accessSync, constants } from 'node:fs';
+import { delimiter, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { Config } from './config.ts';
 
@@ -37,6 +38,23 @@ export function shQuote(value: string): string {
 function sanitizeLabel(label: string): string {
   const cleaned = label.replace(/[^A-Za-z0-9_./-]/g, '-');
   return cleaned.length > 0 ? cleaned : 'wtshunt';
+}
+
+/** True if `bin` resolves to an executable file somewhere on `$PATH`. */
+function isBinOnPath(bin: string): boolean {
+  const pathEnv = process.env.PATH ?? '';
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) {
+      continue;
+    }
+    try {
+      accessSync(join(dir, bin), constants.X_OK);
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 /**
@@ -120,6 +138,48 @@ export function herdrMux(options: HerdrMuxOptions = {}): Mux {
   };
 }
 
+export interface CmuxMuxOptions {
+  /**
+   * Overrides which binary name/path is both invoked and PATH-checked by
+   * `detect()` — for tests only, so detection can be verified against a
+   * harmless stand-in (e.g. `ls`, or a deliberately-missing name) without
+   * depending on whether the real `cmux` happens to be installed, and
+   * `open()` is never actually exercised against the real binary in tests.
+   */
+  cmuxBin?: string;
+}
+
+/**
+ * Priority 3: cmux, a Ghostty-based terminal app whose CLI supports opening
+ * a new workspace directly. Detected via `CMUX_SOCKET_PATH`/
+ * `CMUX_WORKSPACE_ID` *and* the `cmux` binary being on `$PATH` — when the
+ * user's own terminal is running inside cmux, this is the adapter that
+ * actually matters in practice, ahead of tmux.
+ */
+export function cmuxArgs({ title, command, cwd }: MuxOpenOptions): string[] {
+  const args = ['new-workspace', '--name', title];
+  if (cwd) {
+    args.push('--cwd', cwd);
+  }
+  // `new-workspace` is the only cmux subcommand that accepts name/cwd/command
+  // together (confirmed via `cmux --help`) — `tab-action` and `new-surface`
+  // don't take a --command. `--focus false` keeps it from stealing focus
+  // from wtshunt ui's own screen.
+  args.push('--command', command, '--focus', 'false');
+  return args;
+}
+
+export function cmuxMux(options: CmuxMuxOptions = {}): Mux {
+  const cmuxBin = options.cmuxBin ?? 'cmux';
+  return {
+    name: 'cmux',
+    detect: () => Boolean((process.env.CMUX_SOCKET_PATH || process.env.CMUX_WORKSPACE_ID) && isBinOnPath(cmuxBin)),
+    async open(muxOptions) {
+      await execFileAsync(cmuxBin, cmuxArgs(muxOptions));
+    },
+  };
+}
+
 export interface TmuxMuxOptions {
   tmuxBin?: string;
   /** Overrides the tmux server socket (`tmux -L <name>`) — for tests only; real usage attaches to the ambient `$TMUX` server. */
@@ -128,7 +188,7 @@ export interface TmuxMuxOptions {
   targetSession?: string;
 }
 
-/** Priority 3: tmux, detected via `$TMUX`. */
+/** Priority 4: tmux, detected via `$TMUX`. */
 export function tmuxMux(options: TmuxMuxOptions = {}): Mux {
   const tmuxBin = options.tmuxBin ?? 'tmux';
   const socketArgs = options.socketName ? ['-L', options.socketName] : [];
@@ -157,7 +217,7 @@ export function fallbackMessage({ title, command, cwd }: MuxOpenOptions): string
   return `No multiplexer detected for "${title}" — run this in another terminal: ${cd}${command}`;
 }
 
-/** Priority 4: no multiplexer detected and no `[ui] open` template — print guidance instead of opening anything. */
+/** Priority 5: no multiplexer detected and no `[ui] open` template — print guidance instead of opening anything. */
 export function fallbackMux(): Mux {
   return {
     name: 'fallback',
@@ -170,7 +230,8 @@ export function fallbackMux(): Mux {
 
 /**
  * Picks the multiplexer adapter to use: an explicit `[ui] open` template
- * always wins, then herdr, then tmux, then the plain-text fallback.
+ * always wins, then herdr, then cmux, then tmux, then the plain-text
+ * fallback.
  */
 export function resolveMux(config: Config): Mux {
   if (config.ui?.open) {
@@ -180,6 +241,11 @@ export function resolveMux(config: Config): Mux {
   const herdr = herdrMux();
   if (herdr.detect()) {
     return herdr;
+  }
+
+  const cmux = cmuxMux();
+  if (cmux.detect()) {
+    return cmux;
   }
 
   const tmux = tmuxMux();

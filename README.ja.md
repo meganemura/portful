@@ -311,7 +311,7 @@ zsh 用スクリプトは zsh の補完システムを自前で初期化しま�
 
    ```toml
    [ui]
-   open = "cmux run --name {title} {cmd}"
+   open = "my-launcher --name {title} {cmd}"
    ```
 
    `{title}`、`{cmd}`、`{cwd}` が(それぞれ安全にシェルクォートされた
@@ -321,10 +321,14 @@ zsh 用スクリプトは zsh の補完システムを自前で初期化しま�
 2. それが無ければ、[herdr](https://herdr.dev) が検出された場合はそれを
    使います(`HERDR_ENV`/`HERDR_SOCKET_PATH` 環境変数が設定されている
    場合)。
-3. それも無ければ、[tmux](https://github.com/tmux/tmux) が検出された
+3. それも無ければ、[cmux](https://cmux.app) が検出された場合はそれを
+   使います(`CMUX_SOCKET_PATH`/`CMUX_WORKSPACE_ID` が設定されていて
+   `cmux` が `$PATH` にある場合)— フォーカスを奪わずに新しい
+   workspace を開きます。
+4. それも無ければ、[tmux](https://github.com/tmux/tmux) が検出された
    場合はそれを使います(`$TMUX` が設定されている場合)— 現在の
    セッションに新しいウィンドウを追加します。
-4. どれも無ければ、`wtshunt ui` は何も開かず、代わりに手元の別ターミナル
+5. どれも無ければ、`wtshunt ui` は何も開かず、代わりに手元の別ターミナル
    で実行すべきコマンドを表示します。
 
 いずれの場合も、実行されるコマンドは常に wtshunt 自身の解決済み実行

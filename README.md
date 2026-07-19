@@ -313,7 +313,7 @@ that pane in this order:
 
    ```toml
    [ui]
-   open = "cmux run --name {title} {cmd}"
+   open = "my-launcher --name {title} {cmd}"
    ```
 
    `{title}`, `{cmd}`, and `{cwd}` are substituted (each shell-quoted for
@@ -322,9 +322,12 @@ that pane in this order:
    command.
 2. Otherwise, [herdr](https://herdr.dev) is used if it's detected (its
    `HERDR_ENV`/`HERDR_SOCKET_PATH` environment variables are set).
-3. Otherwise, [tmux](https://github.com/tmux/tmux) is used if detected
+3. Otherwise, [cmux](https://cmux.app) is used if it's detected
+   (`CMUX_SOCKET_PATH`/`CMUX_WORKSPACE_ID` are set and `cmux` is on
+   `$PATH`) — a new workspace is opened without stealing focus.
+4. Otherwise, [tmux](https://github.com/tmux/tmux) is used if detected
    (`$TMUX` is set) — a new window is added to the current session.
-4. Otherwise, `wtshunt ui` prints the command to run by hand in another
+5. Otherwise, `wtshunt ui` prints the command to run by hand in another
    terminal, instead of opening anything.
 
 Either way, the command run always references wtshunt's own resolved
