@@ -6,6 +6,8 @@ export interface RepoRow {
   fixedPort: number;
   proxyRunning: boolean;
   proxyPid?: number;
+  /** The worktree the proxy currently forwards to (`repo.active`). Omitted when none is set. */
+  activeWorktree?: string;
 }
 
 export interface WorktreeRow {
@@ -45,6 +47,7 @@ export function buildRows(overview: Overview): UiRow[] {
       fixedPort: repo.fixedPort,
       proxyRunning: Boolean(repo.proxy),
       ...(repo.proxy ? { proxyPid: repo.proxy.pid } : {}),
+      ...(repo.active !== undefined ? { activeWorktree: repo.active } : {}),
     });
 
     for (const wt of repo.worktrees) {

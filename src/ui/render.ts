@@ -8,6 +8,7 @@ export const SHOW_CURSOR = '\x1b[?25h';
 export const CLEAR_AND_HOME = '\x1b[H\x1b[2J';
 export const BOLD = '\x1b[1m';
 export const RED = '\x1b[31m';
+export const GREEN = '\x1b[32m';
 export const RESET = '\x1b[0m';
 
 /**
@@ -30,7 +31,11 @@ const STOPPED = '○';
 function formatRow(row: UiRow): string {
   if (row.kind === 'repo') {
     const indicator = row.proxyRunning ? RUNNING : STOPPED;
-    const proxyText = row.proxyRunning ? `proxy: running (pid ${row.proxyPid})` : 'proxy: stopped';
+    // The arrow only makes sense while the proxy is actually forwarding
+    // traffic: stopped means nothing is being forwarded, and running with
+    // no active worktree set means the proxy has nowhere to send it yet.
+    const arrow = row.proxyRunning && row.activeWorktree !== undefined ? ` → ${row.activeWorktree}` : '';
+    const proxyText = row.proxyRunning ? `proxy: running (pid ${row.proxyPid})${arrow}` : 'proxy: stopped';
     return `${indicator} ${row.repo}  fixed_port=${row.fixedPort}  ${proxyText}`;
   }
 
@@ -40,7 +45,8 @@ function formatRow(row: UiRow): string {
     const portText = row.port !== undefined ? String(row.port) : '-';
     const pidText = row.pid !== undefined ? String(row.pid) : '-';
     const goneNote = row.worktreeGone ? ' (worktree gone)' : '';
-    return `  ${indicator} ${activeMark} ${row.worktree}\t${row.branch}\tport ${portText}\tpid ${pidText}${goneNote}`;
+    const text = `  ${indicator} ${activeMark} ${row.worktree}\t${row.branch}\tport ${portText}\tpid ${pidText}${goneNote}`;
+    return row.active ? `${GREEN}${text}${RESET}` : text;
   }
 
   const marker = row.matches ? '*' : ' ';

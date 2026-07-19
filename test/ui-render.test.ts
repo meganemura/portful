@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderLines, BOLD, RED, RESET, type UiMessage } from '../src/ui/render.ts';
+import { renderLines, BOLD, RED, GREEN, RESET, type UiMessage } from '../src/ui/render.ts';
 import { VALID_ROW_KINDS, type ActionKey } from '../src/ui/actions.ts';
 import type { UiRow } from '../src/ui/model.ts';
 
@@ -66,9 +66,10 @@ test('renderLines: the message line stays at the same position whether or not a 
 
 test('renderLines: a running worktree row (pid set) is marked with ● and a stopped one with ○, without disturbing the active-mark alignment', () => {
   const lines = renderLines(ROWS, 1, NO_MESSAGE);
-  // ROWS[1]: active, pid 111 -> running. Strip the 2-char cursor so the
-  // assertion doesn't care whether the row happens to be selected.
-  assert.match(lines[1].slice(2), /^ {2}● \* api-main\t/);
+  // ROWS[1]: active, pid 111 -> running. Strip the 2-char cursor and (since
+  // it's active) the GREEN wrapper so the assertion doesn't care whether
+  // the row happens to be selected or colored.
+  assert.match(lines[1].slice(2), /^\x1b\[32m {2}● \* api-main\t/);
   // ROWS[2]: inactive, no pid -> stopped; '*' becomes a blank so the name
   // still lines up under the running row's name.
   assert.match(lines[2].slice(2), /^ {2}○ {3}api-feature-x\t/);
@@ -85,6 +86,50 @@ test('renderLines: a repo row is marked ● when its proxy is running and ○ wh
   assert.match(runningLine, /running \(pid 42\)/);
   assert.match(stoppedLine, /^○ api\b/);
   assert.match(stoppedLine, /proxy: stopped/);
+});
+
+test('renderLines: a repo row shows " -> activeWorktree" after the pid when the proxy is running and an active worktree is set', () => {
+  const row: UiRow = { kind: 'repo', repo: 'api', fixedPort: 3000, proxyRunning: true, proxyPid: 42, activeWorktree: 'feature-x' };
+  const line = renderLines([row], 0, NO_MESSAGE)[0];
+  assert.match(line, /proxy: running \(pid 42\) → feature-x$/);
+});
+
+test('renderLines: a repo row shows no arrow when the proxy is running but no active worktree is set', () => {
+  const row: UiRow = { kind: 'repo', repo: 'api', fixedPort: 3000, proxyRunning: true, proxyPid: 42 };
+  const line = renderLines([row], 0, NO_MESSAGE)[0];
+  assert.match(line, /proxy: running \(pid 42\)$/);
+  assert.doesNotMatch(line, /→/);
+});
+
+test('renderLines: a repo row shows no arrow when the proxy is stopped, even if an active worktree is set', () => {
+  const row: UiRow = { kind: 'repo', repo: 'api', fixedPort: 3000, proxyRunning: false, activeWorktree: 'feature-x' };
+  const line = renderLines([row], 0, NO_MESSAGE)[0];
+  assert.match(line, /proxy: stopped$/);
+  assert.doesNotMatch(line, /→/);
+});
+
+test('renderLines: an active worktree row is wrapped in GREEN...RESET (whole row content, cursor stays outside)', () => {
+  const rows: UiRow[] = [
+    { kind: 'worktree', repo: 'api', worktree: 'api-main', branch: 'main', port: 3101, pid: 111, active: true },
+  ];
+  const line = renderLines(rows, 0, NO_MESSAGE)[0];
+  assert.ok(line.startsWith('> '), 'cursor stays outside the color codes');
+  const content = line.slice(2);
+  assert.equal(content, `${GREEN}  ● * api-main\tmain\tport 3101\tpid 111${RESET}`);
+});
+
+test('renderLines: a non-active worktree row has no color codes', () => {
+  const rows: UiRow[] = [{ kind: 'worktree', repo: 'api', worktree: 'api-feature-x', branch: 'feature/x', active: false }];
+  const line = renderLines(rows, 0, NO_MESSAGE)[0];
+  assert.doesNotMatch(line, /\x1b\[/);
+});
+
+test('renderLines: an active worktree row with worktreeGone is still wrapped in GREEN and keeps the note inside it', () => {
+  const rows: UiRow[] = [
+    { kind: 'worktree', repo: 'api', worktree: 'api-gone', branch: 'gone', port: 3105, pid: 222, active: true, worktreeGone: true },
+  ];
+  const line = renderLines(rows, 0, NO_MESSAGE)[0].slice(2);
+  assert.equal(line, `${GREEN}  ● * api-gone\tgone\tport 3105\tpid 222 (worktree gone)${RESET}`);
 });
 
 test('renderLines: task rows show no running/stopped indicator', () => {

@@ -45,6 +45,7 @@ test('buildRows: one repo header row, then its worktree rows, then task rows at 
     assert.equal(apiHeader.fixedPort, 3000);
     assert.equal(apiHeader.proxyRunning, true);
     assert.equal(apiHeader.proxyPid, 222);
+    assert.equal(apiHeader.activeWorktree, 'api-main');
   }
 
   const apiMainRow = rows[1];
@@ -71,6 +72,7 @@ test('buildRows: one repo header row, then its worktree rows, then task rows at 
   if (frontHeader.kind === 'repo') {
     assert.equal(frontHeader.proxyRunning, false);
     assert.equal(frontHeader.proxyPid, undefined);
+    assert.equal(frontHeader.activeWorktree, undefined);
   }
 
   const taskRow = rows[5];
