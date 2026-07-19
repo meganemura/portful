@@ -13,9 +13,9 @@ export interface RepoConfig {
 /** Optional `[ui]` section configuring how `wtshunt ui` opens serve/proxy panes. */
 export interface UiConfig {
   /**
-   * Shell template overriding multiplexer auto-detection (herdr, then tmux),
-   * e.g. `cmux run --name {title} {cmd}`. Substitutes `{title}`, `{cmd}`, and
-   * `{cwd}`, each shell-quoted, then runs the result with `sh -c`.
+   * Shell template overriding multiplexer auto-detection (herdr, cmux, tmux),
+   * e.g. `my-launcher --name {title} {cmd}`. Substitutes `{title}`, `{cmd}`,
+   * and `{cwd}`, each shell-quoted, then runs the result with `sh -c`.
    */
   open?: string;
 }
