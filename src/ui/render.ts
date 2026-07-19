@@ -23,18 +23,24 @@ export interface UiMessage {
   isError: boolean;
 }
 
+/** `●` for "something is actually running here", `○` for "it isn't" — lets a glance at the list answer that before reading any pid/proxy text. */
+const RUNNING = '●';
+const STOPPED = '○';
+
 function formatRow(row: UiRow): string {
   if (row.kind === 'repo') {
+    const indicator = row.proxyRunning ? RUNNING : STOPPED;
     const proxyText = row.proxyRunning ? `proxy: running (pid ${row.proxyPid})` : 'proxy: stopped';
-    return `${row.repo}  fixed_port=${row.fixedPort}  ${proxyText}`;
+    return `${indicator} ${row.repo}  fixed_port=${row.fixedPort}  ${proxyText}`;
   }
 
   if (row.kind === 'worktree') {
+    const indicator = row.pid !== undefined ? RUNNING : STOPPED;
     const activeMark = row.active ? '*' : ' ';
     const portText = row.port !== undefined ? String(row.port) : '-';
     const pidText = row.pid !== undefined ? String(row.pid) : '-';
     const goneNote = row.worktreeGone ? ' (worktree gone)' : '';
-    return `  ${activeMark} ${row.worktree}\t${row.branch}\tport ${portText}\tpid ${pidText}${goneNote}`;
+    return `  ${indicator} ${activeMark} ${row.worktree}\t${row.branch}\tport ${portText}\tpid ${pidText}${goneNote}`;
   }
 
   const marker = row.matches ? '*' : ' ';

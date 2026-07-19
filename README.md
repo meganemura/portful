@@ -426,7 +426,10 @@ that pane in this order:
    multiplexer or launcher whose CLI can open a new pane running a given
    command.
 2. Otherwise, [herdr](https://herdr.dev) is used if it's detected (its
-   `HERDR_ENV`/`HERDR_SOCKET_PATH` environment variables are set).
+   `HERDR_ENV`/`HERDR_SOCKET_PATH` environment variables are set). Each new
+   pane is opened to the right of the previously-opened one (not always
+   right next to `wtshunt ui`'s own pane), so opening rows from top to
+   bottom lands panes left to right in that same order.
 3. Otherwise, [cmux](https://cmux.app) is used if it's detected
    (`CMUX_SOCKET_PATH`/`CMUX_WORKSPACE_ID` are set and `cmux` is on
    `$PATH`) — a new workspace is opened without stealing focus.

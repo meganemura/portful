@@ -64,6 +64,34 @@ test('renderLines: the message line stays at the same position whether or not a 
   assert.notEqual(withMessage[withMessage.length - 2], '');
 });
 
+test('renderLines: a running worktree row (pid set) is marked with ● and a stopped one with ○, without disturbing the active-mark alignment', () => {
+  const lines = renderLines(ROWS, 1, NO_MESSAGE);
+  // ROWS[1]: active, pid 111 -> running. Strip the 2-char cursor so the
+  // assertion doesn't care whether the row happens to be selected.
+  assert.match(lines[1].slice(2), /^ {2}● \* api-main\t/);
+  // ROWS[2]: inactive, no pid -> stopped; '*' becomes a blank so the name
+  // still lines up under the running row's name.
+  assert.match(lines[2].slice(2), /^ {2}○ {3}api-feature-x\t/);
+});
+
+test('renderLines: a repo row is marked ● when its proxy is running and ○ when it is stopped', () => {
+  const running: UiRow = { kind: 'repo', repo: 'api', fixedPort: 3000, proxyRunning: true, proxyPid: 42 };
+  const stopped: UiRow = { kind: 'repo', repo: 'api', fixedPort: 3000, proxyRunning: false };
+
+  const runningLine = renderLines([running], 0, NO_MESSAGE)[0].slice(2);
+  const stoppedLine = renderLines([stopped], 0, NO_MESSAGE)[0].slice(2);
+
+  assert.match(runningLine, /^● api\b/);
+  assert.match(runningLine, /running \(pid 42\)/);
+  assert.match(stoppedLine, /^○ api\b/);
+  assert.match(stoppedLine, /proxy: stopped/);
+});
+
+test('renderLines: task rows show no running/stopped indicator', () => {
+  const line = renderLines(ROWS, 3, NO_MESSAGE)[3];
+  assert.doesNotMatch(line, /[●○]/);
+});
+
 test('renderLines: a worktree row with worktreeGone shows a "(worktree gone)" note', () => {
   const rows: UiRow[] = [
     { kind: 'worktree', repo: 'api', worktree: 'api-gone', branch: 'gone', port: 3105, pid: 222, active: false, worktreeGone: true },

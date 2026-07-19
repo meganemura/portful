@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -215,6 +215,255 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
   // Deliberately never calls .open() here: a real herdr session/pane must
   // never be started or opened by this test suite, per the hard constraint
   // that only a real end user verifies herdr on their own machine.
+});
+
+/**
+ * Stands in for the real `herdr` binary in the `herdrMux.open()` tests
+ * below (which — unlike the `.detect()` test above — do exercise `.open()`,
+ * but only ever against this stand-in, never the real `herdr`). Understands
+ * just enough of `agent start`/`pane get` to drive `herdrMux`'s split-base
+ * resolution:
+ *
+ * - `agent start ...` appends one JSON line to `$STUB_LOG` recording its
+ *   argv and the `HERDR_PANE_ID` it was invoked with, then prints either
+ *   `$STUB_AGENT_START_STDOUT` verbatim (to simulate an unparsable
+ *   response) or a JSON blob with `$STUB_AGENT_START_PANE_ID` nested a few
+ *   levels deep as `pane_id` (or no `pane_id` at all if that var is unset),
+ *   exiting with `$STUB_AGENT_START_EXIT` (default 0).
+ * - `pane get <id>` also logs, then exits 0 with a `pane_id` echoed back if
+ *   `<id>` is listed in the comma-separated `$STUB_ALIVE_PANES`, otherwise
+ *   exits 1 with an `{"error":{"code":"pane_not_found"}}` body — mirroring
+ *   the real herdr CLI's confirmed behavior for an unknown pane id.
+ */
+async function writeHerdrStub(dir: string): Promise<string> {
+  const stubPath = join(dir, 'herdr-stub.cjs');
+  const script = `#!/usr/bin/env node
+const fs = require('node:fs');
+const argv = process.argv.slice(2);
+if (process.env.STUB_LOG) {
+  fs.appendFileSync(
+    process.env.STUB_LOG,
+    JSON.stringify({ argv, HERDR_PANE_ID: process.env.HERDR_PANE_ID ?? null }) + '\\n'
+  );
+}
+
+if (argv[0] === 'agent' && argv[1] === 'start') {
+  if (process.env.STUB_AGENT_START_STDOUT !== undefined) {
+    process.stdout.write(process.env.STUB_AGENT_START_STDOUT);
+  } else {
+    const paneId = process.env.STUB_AGENT_START_PANE_ID;
+    const result = paneId ? { agent: { pane: { pane_id: paneId } } } : { agent: {} };
+    process.stdout.write(JSON.stringify({ id: 'cli:agent:start', result }));
+  }
+  process.exit(Number(process.env.STUB_AGENT_START_EXIT ?? '0'));
+}
+
+if (argv[0] === 'pane' && argv[1] === 'get') {
+  const target = argv[2];
+  const alive = (process.env.STUB_ALIVE_PANES ?? '').split(',').filter(Boolean);
+  if (alive.includes(target)) {
+    process.stdout.write(JSON.stringify({ id: 'cli:pane:get', result: { pane: { pane_id: target } } }));
+    process.exit(0);
+  }
+  process.stdout.write(JSON.stringify({ error: { code: 'pane_not_found' } }));
+  process.exit(1);
+}
+
+process.exit(1);
+`;
+  await writeFile(stubPath, script);
+  await chmod(stubPath, 0o755);
+  return stubPath;
+}
+
+interface StubCall {
+  argv: string[];
+  HERDR_PANE_ID: string | null;
+}
+
+async function readStubLog(logFile: string): Promise<StubCall[]> {
+  const content = await readFile(logFile, 'utf8').catch(() => '');
+  return content
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as StubCall);
+}
+
+function agentStartCalls(calls: StubCall[]): StubCall[] {
+  return calls.filter((c) => c.argv[0] === 'agent' && c.argv[1] === 'start');
+}
+
+function paneGetCalls(calls: StubCall[]): StubCall[] {
+  return calls.filter((c) => c.argv[0] === 'pane' && c.argv[1] === 'get');
+}
+
+const HERDR_OPEN_TEST_ENV_KEYS = [
+  'HERDR_PANE_ID',
+  'STUB_LOG',
+  'STUB_AGENT_START_PANE_ID',
+  'STUB_AGENT_START_STDOUT',
+  'STUB_AGENT_START_EXIT',
+  'STUB_ALIVE_PANES',
+] as const;
+
+type HerdrOpenTestEnv = Partial<Record<(typeof HERDR_OPEN_TEST_ENV_KEYS)[number], string>>;
+
+function saveHerdrOpenTestEnv(): HerdrOpenTestEnv {
+  const saved: HerdrOpenTestEnv = {};
+  for (const key of HERDR_OPEN_TEST_ENV_KEYS) {
+    saved[key] = process.env[key];
+  }
+  return saved;
+}
+
+function restoreHerdrOpenTestEnv(saved: HerdrOpenTestEnv): void {
+  for (const key of HERDR_OPEN_TEST_ENV_KEYS) {
+    if (saved[key] === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = saved[key];
+    }
+  }
+}
+
+test('herdrMux.open: the first open splits off wtshunt ui\'s own pane (via $HERDR_PANE_ID) with --split right', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const herdrBin = await writeHerdrStub(dir);
+    const logFile = join(dir, 'log.jsonl');
+    process.env.HERDR_PANE_ID = 'w1:p1'; // wtshunt ui's own pane
+    process.env.STUB_LOG = logFile;
+    process.env.STUB_AGENT_START_PANE_ID = 'w1:p2';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'api/feature-x', command: 'echo hi', cwd: '/tmp' });
+
+    const calls = agentStartCalls(await readStubLog(logFile));
+    assert.equal(calls.length, 1);
+    const splitIndex = calls[0].argv.indexOf('--split');
+    assert.notEqual(splitIndex, -1, `expected --split in argv: ${JSON.stringify(calls[0].argv)}`);
+    assert.equal(calls[0].argv[splitIndex + 1], 'right');
+    assert.equal(calls[0].HERDR_PANE_ID, 'w1:p1');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: the pane id the stub returns from the first open becomes the split base for the second', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const herdrBin = await writeHerdrStub(dir);
+    const logFile = join(dir, 'log.jsonl');
+    process.env.HERDR_PANE_ID = 'w1:p1';
+    process.env.STUB_LOG = logFile;
+    // The pane `pane get` is asked about below is the one the first open()
+    // reports creating, so it must be "alive" for the chain to hold.
+    process.env.STUB_ALIVE_PANES = 'w1:p2';
+    process.env.STUB_AGENT_START_PANE_ID = 'w1:p2';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1' });
+    await mux.open({ title: 'second', command: 'echo 2' });
+
+    const calls = await readStubLog(logFile);
+    const starts = agentStartCalls(calls);
+    assert.equal(starts.length, 2);
+    assert.equal(starts[0].HERDR_PANE_ID, 'w1:p1', 'first open splits off wtshunt ui\'s own pane');
+    assert.equal(starts[1].HERDR_PANE_ID, 'w1:p2', 'second open chains off the pane the first open created');
+
+    // And it got there via a `pane get w1:p2` check, not by construction.
+    const gets = paneGetCalls(calls);
+    assert.equal(gets.length, 1);
+    assert.equal(gets[0].argv[2], 'w1:p2');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: falls back to wtshunt ui\'s own pane when the previously-opened pane no longer exists', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const herdrBin = await writeHerdrStub(dir);
+    const logFile = join(dir, 'log.jsonl');
+    process.env.HERDR_PANE_ID = 'w1:p1';
+    process.env.STUB_LOG = logFile;
+    process.env.STUB_ALIVE_PANES = ''; // `pane get` fails for everything — the pane was closed.
+    process.env.STUB_AGENT_START_PANE_ID = 'w1:p2';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1' });
+    await mux.open({ title: 'second', command: 'echo 2' });
+
+    const starts = agentStartCalls(await readStubLog(logFile));
+    assert.equal(starts.length, 2);
+    assert.equal(starts[0].HERDR_PANE_ID, 'w1:p1');
+    // Would be 'w1:p2' if it wrongly chained onto a pane that `pane get`
+    // reported as gone; it must fall back to wtshunt ui's own pane instead.
+    assert.equal(starts[1].HERDR_PANE_ID, 'w1:p1');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: degrades to the traditional split base when agent start\'s stdout is not JSON', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const herdrBin = await writeHerdrStub(dir);
+    const logFile = join(dir, 'log.jsonl');
+    process.env.HERDR_PANE_ID = 'w1:p1';
+    process.env.STUB_LOG = logFile;
+    process.env.STUB_AGENT_START_STDOUT = 'this is not json';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1' });
+    delete process.env.STUB_AGENT_START_STDOUT; // second open's own stdout doesn't matter here
+    await mux.open({ title: 'second', command: 'echo 2' });
+
+    const calls = await readStubLog(logFile);
+    const starts = agentStartCalls(calls);
+    assert.equal(starts.length, 2);
+    assert.equal(starts[0].HERDR_PANE_ID, 'w1:p1');
+    // Unparsable stdout means no pane id was learned, so the second open
+    // must fall back to wtshunt ui's own pane rather than chaining onto
+    // anything derived from garbage output.
+    assert.equal(starts[1].HERDR_PANE_ID, 'w1:p1');
+    // And it must do so without even bothering to check a (nonexistent)
+    // previous pane via `pane get`.
+    assert.equal(paneGetCalls(calls).length, 0);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: with no $HERDR_PANE_ID and no prior pane, opens exactly as before (no --split, env untouched)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const herdrBin = await writeHerdrStub(dir);
+    const logFile = join(dir, 'log.jsonl');
+    delete process.env.HERDR_PANE_ID; // wtshunt ui wasn't itself started from a herdr pane
+    process.env.STUB_LOG = logFile;
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1', cwd: '/tmp' });
+
+    const starts = agentStartCalls(await readStubLog(logFile));
+    assert.equal(starts.length, 1);
+    assert.equal(starts[0].HERDR_PANE_ID, null);
+    assert.equal(starts[0].argv.includes('--split'), false);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('cmuxArgs: builds new-workspace with --name/--cwd/--command and --focus false', () => {
