@@ -2,12 +2,14 @@
 
 [日本語版](README.ja.md)
 
-`wtshunt` lets one service (say, a frontend dev server) keep hitting a
-fixed port for a backend (say, a Rails app) while you juggle several git
-worktrees of that backend at once. Each worktree gets its own backend
-server on its own port; a small reverse proxy sits on the fixed port and
+Git worktrees let you develop several branches in parallel, but the
+client that talks to your server (say, a frontend dev server) still hits
+a single port — so every switch means stopping the running server and
+starting it again from another worktree. `wtshunt` removes that
+restart: each worktree keeps its own backend server (say, a Rails app)
+warm on its own port, and a small reverse proxy on the fixed port
 forwards to whichever worktree is currently "active." Switching takes
-effect on the very next request — no restarting the frontend, no editing
+effect on the very next request — no restarting the client, no editing
 `.env`, no `cd`.
 
 The name is short for **worktree shunt**. A shunt is the railway
@@ -113,10 +115,8 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 - Each worktree that ever gets a `wtshunt serve` keeps the same port
   across restarts (a "sticky" assignment), unless wtshunt finds the
   port occupied at assignment time, in which case the next free port in
-  `port_range` is used. The occupancy probe binds the IPv4 and IPv6
-  wildcard addresses, which catches a foreign listener regardless of
-  which interface it bound — see Limitations for what it still can't
-  catch.
+  `port_range` is used. The occupancy check has limits — see
+  Limitations.
 
 If the config file is missing, `wtshunt` prints the two-repo example
 above and exits.
@@ -161,13 +161,15 @@ by hand.
 
 Shows, for every configured repo: the active worktree, every running
 server (worktree, branch, port, pid), and whether the proxy is running
-and what it's currently routing to. (Also lists any defined tasks — see
-[Tasks (experimental)](#tasks-experimental) below.) `wtshunt status --json`
-prints the same data as machine-readable JSON instead, e.g.:
+and what it's currently routing to. `wtshunt status --json` prints the
+same data as machine-readable JSON instead, e.g.:
 
 ```sh
 wtshunt status --json | jq '.repos[] | {name, active}'
 ```
+
+It also lists any defined tasks — see
+[Tasks (experimental)](#tasks-experimental) below.
 
 ### `wtshunt stop [repo]`
 
@@ -175,7 +177,7 @@ Stops the running server for the active (or given) worktree: sends
 `SIGTERM` to its process group, then polls for up to 2 seconds to
 confirm it actually exited before removing it from `wtshunt status`. If
 it's still alive after that, the entry is left in place and `stop` exits
-non-zero with a warning (see Limitations).
+`1` with a warning (see Limitations).
 
 ### `wtshunt proxy [repo]`
 
@@ -183,9 +185,10 @@ Starts the reverse proxy on the repo's `fixed_port`, in the foreground;
 stop it with `Ctrl-C`. Every request is forwarded to whatever worktree is
 currently active, re-read from disk on every request — so `wtshunt use`
 takes effect on the very next new connection, with the proxy left
-running. Responses (including error responses) carry an
+running. Ordinary HTTP responses (including error responses) carry an
 `X-Wtshunt-Worktree` header naming the worktree that handled (or failed
-to handle) the request. If the active worktree has no server running,
+to handle) the request — the WebSocket handshake response is the one
+exception (see Limitations). If the active worktree has no server running,
 the proxy returns `502` with a hint to run `wtshunt serve`. If
 `fixed_port` is already in use when starting, it prints the process
 occupying it (via `lsof`) and exits. WebSocket and other Upgrade
@@ -214,10 +217,11 @@ without leaving the screen:
 - `q` / `Ctrl-C` — quit.
 
 The screen refreshes automatically every couple of seconds and right
-after every action. `serve`/`proxy` are always opened in a separate pane,
-tab, or window — never in the same process as the UI itself — using
-whichever multiplexer is available; see the next section for how that's
-chosen. Requires an interactive terminal (TTY).
+after every action. `serve`/`proxy` are opened in a separate pane, tab,
+or window — never in the same process as the UI itself — using whichever
+multiplexer is available; with none detected, the command is printed for
+you to run by hand instead. See "Opening panes from `wtshunt ui`" for
+how the multiplexer is chosen. Requires an interactive terminal (TTY).
 
 ### `wtshunt help [command]`
 
@@ -242,9 +246,9 @@ command's own help (equivalent to `wtshunt <command> --help`).
   actually listening.
 - **Port probes can still be fooled.** The free-port check binds the
   IPv4 and IPv6 wildcard addresses, which catches a foreign process
-  regardless of which interface it's on, but a sticky port stolen by
-  another process in the narrow window between that check and the new
-  server's own bind can still make it die instantly with `EADDRINUSE`.
+  regardless of which interface it's on. What remains is the narrow
+  window between that check and the new server's own bind: a sticky
+  port stolen there can still make it die instantly with `EADDRINUSE`.
   If a server exits right within a couple of seconds of `wtshunt serve`,
   the hint printed tells you whether the assigned port is now held by
   another process (per `lsof`) or whether this looks like the usual
@@ -252,11 +256,11 @@ command's own help (equivalent to `wtshunt <command> --help`).
 - **`stop` waits up to 2 seconds, then gives up loudly.** It sends
   `SIGTERM` and polls for the process to actually exit; if it's still
   alive after 2 seconds (traps `SIGTERM`, or is just shutting down
-  slowly), the state entry is deliberately left in place — you'll keep
-  seeing it in `wtshunt status`, and `stop` exits non-zero with a
-  warning rather than silently pretending it worked.
+  slowly), its entry is deliberately kept — you'll keep seeing it in
+  `wtshunt status`, and `stop` exits `1` with a warning rather than
+  silently pretending it worked.
 - **Worktrees usually share a dev database.** Running branches with
-  diverging migrations against the same database will break one of them;
+  diverging migrations against the same database can break one of them;
   consider per-worktree database names if you switch heavily.
 
 ## Shell completion
@@ -294,10 +298,9 @@ bash:
 wtshunt completion >> ~/.bashrc
 ```
 
-Open a new shell (or `source` the rc file) to pick it up. If you add repos
-or worktrees later, no reinstall is needed — only the static script (which
-command names exist) is appended once; the repo and worktree suggestions
-themselves are computed fresh on every `<Tab>`.
+Open a new shell (or `source` the rc file) to pick it up. Only the
+static script (which command names exist) lives in the rc file; the
+suggestions themselves come from running `wtshunt` on every `<Tab>`.
 
 The zsh script initializes zsh's completion system itself (it calls
 `compinit` if `compdef` isn't already available), so it works even in a
@@ -306,8 +309,8 @@ The zsh script initializes zsh's completion system itself (it calls
 ## Opening panes from `wtshunt ui`
 
 When `wtshunt ui` opens `serve` or `proxy` for a row (`s`/`r`/`p`), it
-always launches them as a separate foreground process in a new pane, tab,
-or window — the same kind of process a plain `wtshunt serve`/`wtshunt
+launches them as a separate foreground process in a new pane, tab, or
+window — the same kind of process a plain `wtshunt serve`/`wtshunt
 proxy` invocation would be, just started for you. It picks how to open
 that pane in this order:
 
@@ -357,34 +360,39 @@ wtshunt task use feature-x
   gets prompted for (peco, or a numbered picker, with a leading option
   to leave that repo out of the task entirely).
 - `wtshunt task use <name>` validates every member's worktree still
-  exists — if even one doesn't, nothing is applied — then switches all
-  of them at once. Reports which members have no server running yet,
-  and warns about any already-running server whose `{<repo>.port}`
-  wiring no longer matches (see below).
+  exists — if even one doesn't, nothing is applied and an error is
+  reported — then switches all of them at once. Reports which members
+  have no server running yet, and warns about any already-running
+  server whose `{<repo>.port}` wiring no longer matches (see below).
 - `wtshunt task list` lists tasks and their members, marking with `*`
   any task whose members all match the current active worktrees.
 - `wtshunt task rm <name>` removes a task.
 
-**How repos actually stay wired together.** The fixed-port proxy in
-front of a service re-reads `state.json` on every request, so *that*
-part always reflects whichever worktree is currently active — no
-restart needed. A `serve` template's `{<repo>.port}` reference is
-different: it's substituted once, into the literal shell command run
-when that server starts, so it's fixed for as long as that process
-keeps running. Switching `api`'s active worktree doesn't retroactively
-change what an already-running `front` process is connected to — it
-keeps talking to `api`'s old port until you restart it. This is exactly
-what `task use` checks for: if a server is still running with
-`{<repo>.port}` wiring that no longer matches, it prints a warning
-telling you to `wtshunt stop <repo> && wtshunt serve <repo>` to pick up
-the new one. A worktree that was never running in the first place picks
-up the correct wiring automatically the first time you `serve` it.
+### How the wiring works
 
-If `front` also has a checked-in `.env` with its own `API_URL`, the
-`API_URL={api.port}` prefix in the `serve` template only wins if your
-framework's `.env` loader treats already-set environment variables as
-authoritative and doesn't overwrite them — the common default for most
-dotenv implementations, but worth confirming once for your stack.
+The fixed-port proxy in front of a service re-reads `state.json`
+(wtshunt's on-disk record of what's running) on every request, so *that*
+part always reflects whichever worktree is currently active — no
+restart needed.
+
+A `serve` template's `{<repo>.port}` reference is different: it's
+substituted once, into the literal shell command run when that server
+starts, so it's fixed for as long as that process keeps running.
+Switching `api`'s active worktree doesn't retroactively change what an
+already-running `front` process is connected to — it keeps talking to
+`api`'s old port until you restart it. This is exactly what `task use`
+checks for: if a server is still running with `{<repo>.port}` wiring
+that no longer matches, it prints a warning telling you to
+`wtshunt stop <repo> && wtshunt serve <repo>` to pick up the new one. A
+worktree that was never running in the first place picks up the correct
+wiring automatically the first time you `serve` it.
+
+Suppose `front` also has a checked-in `.env` that sets its own
+`API_URL`. The `API_URL={api.port}` prefix in the `serve` template
+still wins only if your framework's `.env` loader treats already-set
+environment variables as authoritative and doesn't overwrite them —
+the common default for most dotenv implementations, but worth
+confirming once for your stack.
 
 Because the proxy's host:port never changes across a switch, any
 cookies your client already holds carry over automatically. Whether the
