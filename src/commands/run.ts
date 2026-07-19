@@ -1,6 +1,13 @@
 import { spawn } from 'node:child_process';
 import { loadConfig } from '../config.ts';
-import { findWorktree, listWorktrees, looksLikeRepoArg, parseRepoArg, resolveRepoFromCwd } from '../repo.ts';
+import {
+  cwdActiveMismatchWarning,
+  findWorktree,
+  listWorktrees,
+  looksLikeRepoArg,
+  parseRepoArg,
+  resolveRepoFromCwd,
+} from '../repo.ts';
 import { readState } from '../state.ts';
 
 const RUN_USAGE =
@@ -52,6 +59,17 @@ export async function runCommand(rawArgs: string[]): Promise<void> {
   if (!targetName) {
     throw new Error(`No active worktree for repo "${repoName}". Run "wtshunt use ${repoName}/<worktree>" first.`);
   }
+
+  // Only when the target came from the active pointer (repo omitted, or
+  // given bare with no explicit /worktree) — an explicit repo/worktree
+  // means the user picked this on purpose, so there's nothing to warn about.
+  if (worktreeName === undefined) {
+    const warning = await cwdActiveMismatchWarning(config, cwd, repoName, targetName);
+    if (warning) {
+      console.error(warning);
+    }
+  }
+
   const worktree = findWorktree(worktrees, targetName);
   if (!worktree) {
     throw new Error(`Worktree "${targetName}" not found in repo "${repoName}".`);

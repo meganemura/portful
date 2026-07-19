@@ -145,6 +145,8 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 たとえば `wtshunt run api bin/rails console`、そのリポジトリの中にいるなら単に `wtshunt run bin/rails console` と書けます。
 内側のコマンドのフラグは一切加工されずに素通しされます(`run` については `wtshunt` はオプションパースを一切しません)。
 `wtshunt run api bin/rails s -p 3105` は、手で実行したのと完全に同じように動きます。
+対象 worktree がリポジトリのアクティブポインタ由来で決まった場合(repo を省略した、または `/worktree` を付けずに裸で指定した場合)、cwd がそのリポジトリの**別の** worktree の中にあると、`run` と `serve` は実行前に標準エラーへ1行警告を出します。
+`repo/worktree` を明示的に指定すれば、その選択は意図的なものとみなされ警告は出ません。
 
 ### `wtshunt status`
 

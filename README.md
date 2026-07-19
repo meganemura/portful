@@ -175,7 +175,12 @@ inside that repo already, just `wtshunt run bin/rails console`. Flags on
 the inner command are passed through completely untouched (`wtshunt`
 does no option parsing at all for `run`), so
 `wtshunt run api bin/rails s -p 3105` works exactly as if you'd run it
-by hand.
+by hand. If the target worktree comes from the repo's active pointer
+(repo omitted, or given bare with no `/worktree`) and your cwd is
+actually inside a *different* worktree of that repo, both `run` and
+`serve` print a one-line warning to stderr before running — passing
+`repo/worktree` explicitly always suppresses it, since that's you
+choosing on purpose.
 
 ### `wtshunt status`
 

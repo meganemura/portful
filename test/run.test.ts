@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { ensureRepoState, withState } from '../src/state.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +68,71 @@ test('run: --help on the wrapped command passes through when a repo is given', a
       { env: { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir } }
     );
     assert.equal(stdout.trim(), '--help world');
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+async function makeTwoWorktreeFixture(): Promise<{ base: string; main: string; taskB: string; configDir: string }> {
+  const { base, configDir } = await makeRepoFixture();
+  const main = join(base, 'main');
+  const taskB = join(base, 'task-b');
+  await git(main, ['worktree', 'add', '-q', '-b', 'task-b', taskB]);
+  return { base, main, taskB, configDir };
+}
+
+test('run: warns on stderr when cwd is in a different worktree than active, given just the repo name', async () => {
+  const { base, taskB, configDir } = await makeTwoWorktreeFixture();
+  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-run-state-'));
+  const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
+  const original = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
+  process.env.XDG_CONFIG_HOME = configDir;
+  process.env.XDG_STATE_HOME = stateDir;
+  try {
+    await withState((state) => {
+      ensureRepoState(state, 'b').active = 'main';
+    });
+  } finally {
+    if (original.XDG_CONFIG_HOME === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = original.XDG_CONFIG_HOME;
+    if (original.XDG_STATE_HOME === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = original.XDG_STATE_HOME;
+  }
+
+  try {
+    // cwd is task-b, but active is main, and only the bare repo name "b" is
+    // given (no explicit /worktree) — this is exactly the trap the warning
+    // targets.
+    const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, 'run', 'b', 'echo', 'hi'], {
+      cwd: taskB,
+      env,
+    });
+    assert.equal(stdout.trim(), 'hi');
+    assert.match(stderr, /Note: cwd is in b\/task-b/);
+    assert.match(stderr, /active worktree b\/main/);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('run: does not warn when the worktree is given explicitly, even if it differs from cwd', async () => {
+  const { base, taskB, configDir } = await makeTwoWorktreeFixture();
+  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-run-state-'));
+  const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
+
+  try {
+    // cwd is task-b, but "b/main" is given explicitly — the user picked
+    // this on purpose, so no warning.
+    const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, 'run', 'b/main', 'echo', 'hi'], {
+      cwd: taskB,
+      env,
+    });
+    assert.equal(stdout.trim(), 'hi');
+    assert.equal(stderr, '');
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });
