@@ -160,7 +160,12 @@ by hand.
 Shows, for every configured repo: the active worktree, every running
 server (worktree, branch, port, pid), and whether the proxy is running
 and what it's currently routing to. (Also lists any defined tasks — see
-[Tasks (experimental)](#tasks-experimental) below.)
+[Tasks (experimental)](#tasks-experimental) below.) `wtshunt status --json`
+prints the same data as machine-readable JSON instead, e.g.:
+
+```sh
+wtshunt status --json | jq '.repos[] | {name, active}'
+```
 
 ### `wtshunt stop [repo]`
 
@@ -189,6 +194,28 @@ with `use`.
 
 Experimental multi-repo presets — see
 [Tasks (experimental)](#tasks-experimental) below.
+
+### `wtshunt ui`
+
+An interactive terminal UI: navigate every repo's worktrees (and any
+defined tasks) with `j`/`k` or the arrow keys, and act on the selected row
+without leaving the screen:
+
+- `u` / Enter — set the active worktree (on a worktree row), or apply a
+  task (on a task row).
+- `s` — start a server for the selected worktree.
+- `x` — stop it.
+- `r` — restart it (stop, then start, skipping the start if the stop
+  timed out).
+- `p` — toggle the proxy for that row's repo: stop it if running, start
+  it otherwise.
+- `q` / `Ctrl-C` — quit.
+
+The screen refreshes automatically every couple of seconds and right
+after every action. `serve`/`proxy` are always opened in a separate pane,
+tab, or window — never in the same process as the UI itself — using
+whichever multiplexer is available; see the next section for how that's
+chosen. Requires an interactive terminal (TTY).
 
 ### `wtshunt help [command]`
 
@@ -238,7 +265,7 @@ newly added repos or worktrees complete right away without reinstalling
 anything:
 
 - With nothing typed yet, it suggests command names (`use`, `serve`,
-  `run`, `status`, `stop`, `proxy`, `task`, `help`, `completion`).
+  `run`, `status`, `stop`, `proxy`, `task`, `ui`, `help`, `completion`).
 - As the first argument to `use`, `serve`, `stop`, `proxy`, or `run`, it
   suggests every repo name and every `repo/worktree` name, so
   `run <Tab>` lists them all and `run api/<Tab>` narrows to worktrees of
@@ -273,6 +300,36 @@ themselves are computed fresh on every `<Tab>`.
 The zsh script initializes zsh's completion system itself (it calls
 `compinit` if `compdef` isn't already available), so it works even in a
 `.zshrc` that never calls `compinit` on its own.
+
+## Opening panes from `wtshunt ui`
+
+When `wtshunt ui` opens `serve` or `proxy` for a row (`s`/`r`/`p`), it
+always launches them as a separate foreground process in a new pane, tab,
+or window — the same kind of process a plain `wtshunt serve`/`wtshunt
+proxy` invocation would be, just started for you. It picks how to open
+that pane in this order:
+
+1. A `[ui]` section in `config.toml`, if present, always wins:
+
+   ```toml
+   [ui]
+   open = "cmux run --name {title} {cmd}"
+   ```
+
+   `{title}`, `{cmd}`, and `{cwd}` are substituted (each shell-quoted for
+   safety) and the result is run with `sh -c`, so this can point at any
+   multiplexer or launcher whose CLI can open a new pane running a given
+   command.
+2. Otherwise, [herdr](https://herdr.dev) is used if it's detected (its
+   `HERDR_ENV`/`HERDR_SOCKET_PATH` environment variables are set).
+3. Otherwise, [tmux](https://github.com/tmux/tmux) is used if detected
+   (`$TMUX` is set) — a new window is added to the current session.
+4. Otherwise, `wtshunt ui` prints the command to run by hand in another
+   terminal, instead of opening anything.
+
+Either way, the command run always references wtshunt's own resolved
+executable path directly, rather than a bare `wtshunt` that depends on
+`$PATH` being set up the same way in the new pane.
 
 ## Tasks (experimental)
 
@@ -343,9 +400,13 @@ via tsx. `src/commands/*.ts` hold one subcommand handler each;
 (`src/commands/proxy.ts` is its thin CLI wrapper). `src/portRefs.ts`
 resolves `{port:<repo>}` references, `src/tasks.ts` holds the wiring-
 mismatch and task-matching logic, and `src/picker.ts` is the peco/
-numbered-prompt picker shared by `use` and `task add`. Runtime state
-lives in `$XDG_STATE_HOME/wtshunt/state.json` (default
-`~/.local/state/wtshunt/state.json`).
+numbered-prompt picker shared by `use` and `task add`. `src/overview.ts`
+collects the data behind both `status` and `status --json`; `src/mux.ts`
+implements the multiplexer adapters `wtshunt ui` opens `serve`/`proxy`
+through; `src/ui/` holds `wtshunt ui`'s row-model, key-dispatch, and
+rendering logic (`src/commands/ui.ts` is its thin terminal/event-loop
+wrapper). Runtime state lives in `$XDG_STATE_HOME/wtshunt/state.json`
+(default `~/.local/state/wtshunt/state.json`).
 
 ## License
 

@@ -161,7 +161,12 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 設定済みの各リポジトリについて、アクティブな worktree、稼働中の全
 サーバ(worktree、ブランチ、ポート、pid)、プロキシの稼働状況と現在の
 転送先を表示します。(定義済みのタスクも一覧します — 下の
-「タスク (experimental)」を参照してください。)
+「タスク (experimental)」を参照してください。) `wtshunt status --json`
+は同じ内容を機械可読な JSON として出力します:
+
+```sh
+wtshunt status --json | jq '.repos[] | {name, active}'
+```
 
 ### `wtshunt stop [repo]`
 
@@ -190,6 +195,27 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 
 experimental な複数リポジトリ向けプリセットです。下の
 「タスク (experimental)」を参照してください。
+
+### `wtshunt ui`
+
+対話的なターミナル UI です。`j`/`k` または矢印キーで各リポジトリの
+worktree(と定義済みのタスク)を一覧・移動でき、画面を離れずに選択中の
+行に対して操作できます:
+
+- `u` / Enter — worktree の行ならそのアクティブ worktree をセットし、
+  タスクの行ならそのタスクを適用します。
+- `s` — 選択中の worktree のサーバを起動します。
+- `x` — 停止します。
+- `r` — 再起動します(停止してから起動。停止がタイムアウトした場合は
+  起動しません)。
+- `p` — その行のリポジトリのプロキシをトグルします: 稼働中なら停止、
+  停止中なら起動します。
+- `q` / `Ctrl-C` — 終了します。
+
+画面は数秒おきに自動更新され、各操作の直後にも更新されます。
+`serve`/`proxy` は常に UI 自身とは別のプロセスとして、別のペイン・タブ・
+ウィンドウで開かれます — どのマルチプレクサを使うかは次のセクションを
+参照してください。対話的なターミナル(TTY)が必要です。
 
 ### `wtshunt help [command]`
 
@@ -237,7 +263,8 @@ experimental な複数リポジトリ向けプリセットです。下の
 や worktree を後から追加しても、再インストールなしで即座に補完されます:
 
 - 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、
-  `status`、`stop`、`proxy`、`task`、`help`、`completion`)を提案します。
+  `status`、`stop`、`proxy`、`task`、`ui`、`help`、`completion`)を
+  提案します。
 - `use`、`serve`、`stop`、`proxy`、`run` の第1引数では、すべての
   リポジトリ名と `repo/worktree` 名を提案します。`run <Tab>` で全候補
   が並び、`run api/<Tab>` で `api` の worktree に絞り込まれます。
@@ -271,6 +298,38 @@ wtshunt completion >> ~/.bashrc
 zsh 用スクリプトは zsh の補完システムを自前で初期化します(`compdef`
 が未定義なら `compinit` を呼びます)。そのため、`compinit` を一度も
 呼ばない `.zshrc` でもそのまま動きます。
+
+## `wtshunt ui` からのペインの開き方
+
+`wtshunt ui` が行に対して `serve`/`proxy` を開くとき(`s`/`r`/`p`)、
+常に別のペイン・タブ・ウィンドウの中でフォアグラウンドプロセスとして
+起動します — 手元で `wtshunt serve`/`wtshunt proxy` を実行するのと同じ
+種類のプロセスを、代わりに起動してくれるだけです。開き方は次の順番で
+決まります:
+
+1. `config.toml` に `[ui]` セクションがあれば、それが常に優先されます:
+
+   ```toml
+   [ui]
+   open = "cmux run --name {title} {cmd}"
+   ```
+
+   `{title}`、`{cmd}`、`{cwd}` が(それぞれ安全にシェルクォートされた
+   上で)置換され、その結果が `sh -c` で実行されます。そのため、
+   「ラベル付きの新しいペインで指定コマンドを実行できる」CLI を持つ
+   マルチプレクサやランチャーであれば何でも指定できます。
+2. それが無ければ、[herdr](https://herdr.dev) が検出された場合はそれを
+   使います(`HERDR_ENV`/`HERDR_SOCKET_PATH` 環境変数が設定されている
+   場合)。
+3. それも無ければ、[tmux](https://github.com/tmux/tmux) が検出された
+   場合はそれを使います(`$TMUX` が設定されている場合)— 現在の
+   セッションに新しいウィンドウを追加します。
+4. どれも無ければ、`wtshunt ui` は何も開かず、代わりに手元の別ターミナル
+   で実行すべきコマンドを表示します。
+
+いずれの場合も、実行されるコマンドは常に wtshunt 自身の解決済み実行
+ファイルパスを直接参照します — 新しいペインで `$PATH` が同じように
+設定されているとは限らない、裸の `wtshunt` には依存しません。
 
 ## タスク (experimental)
 
@@ -343,8 +402,13 @@ npm test        # node:test。テストが実際の設定や state に触れる�
 はその薄い CLI ラッパー)。`src/portRefs.ts` が `{port:<repo>}` の解決、
 `src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、
 `src/picker.ts` が `use` と `task add` で共有する peco/番号選択の
-ピッカーです。実行時の state は `$XDG_STATE_HOME/wtshunt/state.json`
-(デフォルトは `~/.local/state/wtshunt/state.json`)に置かれます。
+ピッカーです。`src/overview.ts` が `status`/`status --json` 双方の元
+データを集約し、`src/mux.ts` が `wtshunt ui` の `serve`/`proxy` 起動に
+使うマルチプレクサアダプタの実装、`src/ui/` が `wtshunt ui` の
+行モデル・キー処理・描画ロジックです(`src/commands/ui.ts` はその薄い
+ターミナル/イベントループラッパー)。実行時の state は
+`$XDG_STATE_HOME/wtshunt/state.json`(デフォルトは
+`~/.local/state/wtshunt/state.json`)に置かれます。
 
 ## ライセンス
 
