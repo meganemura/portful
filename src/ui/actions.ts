@@ -62,14 +62,20 @@ export function keyToAction(row: UiRow | undefined, key: string): Action {
 }
 
 /** A key `keyToAction` recognizes as bound to *some* action, on the right row kind. */
-type ActionKey = 'u' | 'return' | 's' | 'x' | 'r' | 'p';
+export type ActionKey = 'u' | 'return' | 's' | 'x' | 'r' | 'p';
 
 function isActionKey(key: string): key is ActionKey {
   return key === 'u' || key === 'return' || key === 's' || key === 'x' || key === 'r' || key === 'p';
 }
 
-/** Row kinds each action key applies to — kept in lockstep with the `if` conditions in `keyToAction` above. */
-const VALID_ROW_KINDS: Record<ActionKey, UiRow['kind'][]> = {
+/**
+ * Row kinds each action key applies to — kept in lockstep with the `if`
+ * conditions in `keyToAction` above. Exported so the row-kind help text in
+ * `render.ts` (which lists keys per row kind for the ever-visible help
+ * line) can be cross-checked against this table in tests, since the two
+ * are maintained separately for the sake of display order/labels.
+ */
+export const VALID_ROW_KINDS: Record<ActionKey, UiRow['kind'][]> = {
   u: ['worktree', 'task'],
   return: ['worktree', 'task'],
   s: ['worktree'],
@@ -78,18 +84,15 @@ const VALID_ROW_KINDS: Record<ActionKey, UiRow['kind'][]> = {
   p: ['repo', 'worktree'],
 };
 
-const ROW_KIND_LABEL: Record<UiRow['kind'], string> = {
-  repo: 'repo row',
-  worktree: 'worktree row',
-  task: 'task row',
-};
-
 const KEY_LABEL: Partial<Record<ActionKey, string>> = { return: 'Enter' };
 
 /**
  * When `keyToAction` resolves to `none` because a *known* action key
  * doesn't apply to the selected row's kind (e.g. `s` on a task row, `x` on
  * a repo row), returns a short one-line explanation for the message line.
+ * Doesn't name the row kind (that vocabulary — "repo row", "task row" —
+ * isn't shown anywhere on screen, so it wouldn't mean anything to the
+ * user); the per-row help line underneath already shows what *does* work.
  * Returns `''` for keys with no binding at all (e.g. `g`) or no selected
  * row — those stay silently ignored, same as before this existed.
  */
@@ -98,7 +101,7 @@ export function invalidKeyHint(row: UiRow | undefined, key: string): string {
     return '';
   }
   const keyLabel = KEY_LABEL[key] ?? key;
-  return `Key "${keyLabel}" does nothing on a ${ROW_KIND_LABEL[row.kind]}.`;
+  return `Key "${keyLabel}" isn't available on this row.`;
 }
 
 /** Everything `executeAction` needs beyond the current `Overview` snapshot, injected so it's testable without touching real state/processes. */

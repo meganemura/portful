@@ -12,10 +12,11 @@ export const RESET = '\x1b[0m';
 
 /**
  * The message line's payload: empty `text` means "nothing to say right
- * now", so `renderLines` falls back to the plain, undecorated help line.
- * A non-empty `text` is rendered bold (red as well when `isError`) so it
- * stands out from the help line it replaces instead of just swapping in
- * unstyled, easy to miss.
+ * now", so `renderLines` renders the message line as blank instead of
+ * dropping it — the help line always stays on the line right after it, at
+ * a fixed position, whether or not there's a message to show. A
+ * non-empty `text` is rendered bold (red as well when `isError`) so it
+ * stands out from the surrounding plain text.
  */
 export interface UiMessage {
   text: string;
@@ -43,13 +44,34 @@ function formatRow(row: UiRow): string {
   return `task ${marker} ${row.task}\t${memberList}`;
 }
 
-const HELP_LINE =
-  'j/k move  u/enter use  s serve  x stop  r restart  p proxy  q quit';
+/**
+ * Help text per row kind, listing only the keys that actually do
+ * something there — matches the existing `key label` style (`u/enter
+ * use`, `p proxy`, ...). `j/k move` and `q quit` apply regardless of the
+ * selected row's kind (navigation always works; `q`/`ctrl-c` quit is
+ * checked in `keyToAction` before it even looks at the row), so both are
+ * listed on every line. Kept in lockstep with `VALID_ROW_KINDS` in
+ * `actions.ts` by convention rather than by construction — the
+ * ui-render test suite cross-checks the two so this can't silently drift
+ * from what `keyToAction` actually accepts.
+ */
+const HELP_BY_KIND: Record<UiRow['kind'], string> = {
+  repo: 'j/k move  p proxy  q quit',
+  worktree: 'j/k move  u/enter use  s serve  x stop  r restart  p proxy  q quit',
+  task: 'j/k move  u/enter apply  q quit',
+};
 
-/** Bold (and red, for errors) so the message line reads as distinct from the plain help line it replaces, instead of an unstyled swap-in that's easy to miss. */
+/** Shown when there's no selected row at all (e.g. no repos configured) — only navigation-independent `quit` still works. */
+const NO_ROW_HELP = 'q quit';
+
+function helpLine(row: UiRow | undefined): string {
+  return row ? HELP_BY_KIND[row.kind] : NO_ROW_HELP;
+}
+
+/** Bold (and red, for errors) so a message reads as distinct from the plain rows/help text around it; empty text renders as a blank line so the help line beneath it never shifts position. */
 function formatMessageLine(message: UiMessage): string {
   if (!message.text) {
-    return HELP_LINE;
+    return '';
   }
   const style = message.isError ? BOLD + RED : BOLD;
   return `${style}${message.text}${RESET}`;
@@ -57,8 +79,10 @@ function formatMessageLine(message: UiMessage): string {
 
 /**
  * Renders the full screen as an array of lines: one per row (with a `>`
- * cursor on the selected one), a blank separator, the message line, and a
- * trailing help line. Pure function of the row list/selection/message, so
+ * cursor on the selected one), a blank separator, the message line (blank
+ * when there's nothing to say, so its absence never moves the help line
+ * below it), and a help line listing only the keys that do something on
+ * the selected row. Pure function of the row list/selection/message, so
  * it's testable without a terminal — actual raw-mode drawing (writing
  * these to the alternate screen) is manual-verification-only.
  */
@@ -76,5 +100,6 @@ export function renderLines(rows: UiRow[], selectedIndex: number, message: UiMes
 
   lines.push('');
   lines.push(formatMessageLine(message));
+  lines.push(helpLine(rows[selectedIndex]));
   return lines;
 }

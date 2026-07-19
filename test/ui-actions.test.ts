@@ -46,13 +46,13 @@ test('keyToAction: an unmapped key with no row is a no-op', () => {
   assert.deepEqual(keyToAction(WORKTREE_ROW, 'z'), { type: 'none' });
 });
 
-test('invalidKeyHint: names the key and row kind when a known action key does not apply to the selected row', () => {
-  assert.equal(invalidKeyHint(TASK_ROW, 's'), 'Key "s" does nothing on a task row.');
-  assert.equal(invalidKeyHint(REPO_ROW, 'x'), 'Key "x" does nothing on a repo row.');
-  assert.equal(invalidKeyHint(REPO_ROW, 'r'), 'Key "r" does nothing on a repo row.');
-  assert.equal(invalidKeyHint(TASK_ROW, 'p'), 'Key "p" does nothing on a task row.');
-  assert.equal(invalidKeyHint(REPO_ROW, 'u'), 'Key "u" does nothing on a repo row.');
-  assert.equal(invalidKeyHint(REPO_ROW, 'return'), 'Key "Enter" does nothing on a repo row.');
+test('invalidKeyHint: names the key, but not the row kind (that vocabulary is not shown anywhere on screen), when a known action key does not apply to the selected row', () => {
+  assert.equal(invalidKeyHint(TASK_ROW, 's'), 'Key "s" isn\'t available on this row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'x'), 'Key "x" isn\'t available on this row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'r'), 'Key "r" isn\'t available on this row.');
+  assert.equal(invalidKeyHint(TASK_ROW, 'p'), 'Key "p" isn\'t available on this row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'u'), 'Key "u" isn\'t available on this row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'return'), 'Key "Enter" isn\'t available on this row.');
 });
 
 test('invalidKeyHint: is empty for a key that is unbound entirely, a valid combination, or no selected row', () => {
