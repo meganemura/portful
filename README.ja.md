@@ -93,8 +93,7 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 - `serve` は `sh -c` で実行され、`{port}` がその worktree に割り当てられたポートに置換されます。
   そのため `serve = "PORT={port} bin/dev"` のような環境変数プレフィックス形式も使えます。
   リテラルの `{port}` プレースホルダは必須で、含まれていない場合は設定の読み込み自体が失敗します。
-  これが無いと、サーバはフレームワークのデフォルトポートで起動してしまいます。
-  その一方で `status` とプロキシは割り当てポートにいると思い込んだままになり、実態とズレるためです。
+  この検証が無ければ、サーバはフレームワークのデフォルトポートで起動する一方、`status` とプロキシは割り当てポートにいると思い込んだままになり、実態とズレてしまうためです。
 - `serve` は `{<repo>.port}` で別の登録済みリポジトリのポートも参照できます。
   上の `front` のテンプレートは `{api.port}` を `api` のアクティブ worktree が使っているポートに解決し、まだ割り当てが無ければ新たに割り当てます。
   これが複数リポジトリの worktree を結びつける仕組みです。
@@ -335,7 +334,7 @@ npm test        # node:test。テストが実際の設定や state に触れる�
 ビルドステップはありません。
 CLI は tsx 経由で `src/` の TypeScript を直接実行します。
 `src/commands/*.ts` が各サブコマンドのハンドラで、`src/proxy.ts` がリバースプロキシの実装本体です(`src/commands/proxy.ts` はその薄い CLI ラッパー)。
-`src/portRefs.ts` が `{<repo>.port}` の解決、`src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、`src/picker.ts` が `use` と `task add` で共有するピッカー(peco、無ければ番号選択)です。
+`src/portRefs.ts` が `{<repo>.port}` の解決、`src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、`src/picker.ts` が `use` と `task add` で共有するピッカー(`[picker]` の設定、無ければ peco/fzf の自動検出、それも無ければ番号選択)です。
 `src/overview.ts` が `status`/`status --json` 双方の元データを集約します。
 `src/mux.ts` が `wtshunt ui` の `serve`/`proxy` 起動に使うマルチプレクサアダプタの実装、`src/ui/` が `wtshunt ui` の行モデル、キー処理、描画のロジックです(`src/commands/ui.ts` はその薄いターミナル/イベントループラッパー)。
 実行時の state は `$XDG_STATE_HOME/wtshunt/state.json`(デフォルトは `~/.local/state/wtshunt/state.json`)に置かれます。

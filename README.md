@@ -427,8 +427,9 @@ via tsx. `src/commands/*.ts` hold one subcommand handler each;
 `src/proxy.ts` is the reverse-proxy implementation itself
 (`src/commands/proxy.ts` is its thin CLI wrapper). `src/portRefs.ts`
 resolves `{<repo>.port}` references, `src/tasks.ts` holds the wiring-
-mismatch and task-matching logic, and `src/picker.ts` is the peco/
-numbered-prompt picker shared by `use` and `task add`. `src/overview.ts`
+mismatch and task-matching logic, and `src/picker.ts` is the worktree
+picker shared by `use` and `task add` (the `[picker]` command, else
+auto-detected peco/fzf, else the numbered prompt). `src/overview.ts`
 collects the data behind both `status` and `status --json`; `src/mux.ts`
 implements the multiplexer adapters `wtshunt ui` opens `serve`/`proxy`
 through; `src/ui/` holds `wtshunt ui`'s row-model, key-dispatch, and
