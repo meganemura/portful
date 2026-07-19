@@ -20,7 +20,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-test('serve: {port:<repo>} references resolve and get recorded as resolvedRefs on the server entry', async () => {
+test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs on the server entry', async () => {
   const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-refs-repo-'));
   const apiMain = join(base, 'api-main');
   const frontMain = join(base, 'front-main');
@@ -56,7 +56,7 @@ test('serve: {port:<repo>} references resolve and get recorded as resolvedRefs o
       `path = "${frontMain}"`,
       'fixed_port = 8080',
       'port_range = [41600, 41610]',
-      'serve = "echo front-on-{port}-api-at-{port:api}; sleep 30"',
+      'serve = "echo front-on-{port}-api-at-{api.port}; sleep 30"',
       '',
     ].join('\n')
   );

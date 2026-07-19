@@ -35,7 +35,7 @@ serve = "bundle exec rails s -p {port}"
 path = "~/work/front"
 fixed_port = 8080
 port_range = [8101, 8199]
-serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
+serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 `;
 
 export function getConfigPath(): string {

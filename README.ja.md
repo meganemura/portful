@@ -91,7 +91,7 @@ serve = "bundle exec rails s -p {port}"
 path = "~/work/front"
 fixed_port = 8080
 port_range = [8101, 8199]
-serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
+serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 ```
 
 - `path` はリポジトリ本体のチェックアウトを指し、`~` 展開が使えます。
@@ -105,8 +105,8 @@ serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
   場合は設定の読み込み自体が失敗します — これが無いとサーバはフレーム
   ワークのデフォルトポートで起動する一方、`status` とプロキシは割り当て
   ポートにいると思い込んだままになるためです。
-- `serve` は `{port:<repo>}` で別の登録済みリポジトリのポートも参照
-  できます — 上の `front` のテンプレートは `{port:api}` を `api` の
+- `serve` は `{<repo>.port}` で別の登録済みリポジトリのポートも参照
+  できます — 上の `front` のテンプレートは `{api.port}` を `api` の
   アクティブ worktree が使っているポートに解決し、まだ割り当てが無け
   れば新たに割り当てます。これが複数リポジトリの worktree を結びつけ
   る仕組みです。詳しくは下の「タスク」を参照してください。
@@ -361,7 +361,7 @@ wtshunt task use feature-x
 - `wtshunt task use <name>` はまず全メンバーの worktree がまだ存在す
   るか検証し、1つでも欠けていれば何も適用せずエラーにします。検証後、
   全メンバーを一括で切り替え、どのメンバーがまだ `wtshunt serve` され
-  ていないかを報告し、起動中のサーバの `{port:<repo>}` の結線が古く
+  ていないかを報告し、起動中のサーバの `{<repo>.port}` の結線が古く
   なっていないかも警告します(下記参照)。
 - `wtshunt task list` はタスクとそのメンバーを一覧し、全メンバーが
   現在のアクティブ worktree と一致するタスクには `*` を付けます。
@@ -370,19 +370,19 @@ wtshunt task use feature-x
 **リポジトリ同士がどう結線され続けるか。** サービスの手前に立つ固定
 ポートのプロキシはリクエストごとに `state.json` を読み直すため、その
 部分は常に現在アクティブな worktree を反映します — 再起動は不要です。
-一方 `serve` テンプレートの `{port:<repo>}` 参照は違います: これは
+一方 `serve` テンプレートの `{<repo>.port}` 参照は違います: これは
 サーバ起動時に実行される具体的なシェルコマンドへ一度だけ置換される
 ため、そのプロセスが動き続けている限り固定されたままです。`api` の
 アクティブ worktree を切り替えても、すでに動いている `front` のプロ
 セスの接続先は自動的には変わりません — 再起動するまで `api` の古い
 ポートを叩き続けます。これはまさに `task use` がチェックしている内容
-です: `{port:<repo>}` の結線がもう一致しないサーバが動いていれば、
+です: `{<repo>.port}` の結線がもう一致しないサーバが動いていれば、
 `wtshunt stop <repo> && wtshunt serve <repo>` で結線し直すよう警告し
 ます。まだ一度も動いていない worktree は、初めて `serve` したときに
 自動的に正しい結線になります。
 
 `front` にも `API_URL` を含むコミット済みの `.env` がある場合、`serve`
-テンプレートの `API_URL={port:api}` プレフィックスが優先されるのは、
+テンプレートの `API_URL={api.port}` プレフィックスが優先されるのは、
 使っているフレームワークの `.env` ローダーが既に設定済みの環境変数を
 上書きしない実装である場合に限ります — ほとんどの dotenv 実装のデフ
 ォルト挙動ではありますが、自分のスタックで一度確認しておく価値はあり
@@ -404,7 +404,7 @@ npm test        # node:test。テストが実際の設定や state に触れる�
 ビルドステップはありません — CLI は tsx 経由で `src/` の TypeScript を
 直接実行します。`src/commands/*.ts` が各サブコマンドのハンドラで、
 `src/proxy.ts` がリバースプロキシの実装本体です(`src/commands/proxy.ts`
-はその薄い CLI ラッパー)。`src/portRefs.ts` が `{port:<repo>}` の解決、
+はその薄い CLI ラッパー)。`src/portRefs.ts` が `{<repo>.port}` の解決、
 `src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、
 `src/picker.ts` が `use` と `task add` で共有する peco/番号選択の
 ピッカーです。`src/overview.ts` が `status`/`status --json` 双方の元

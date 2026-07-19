@@ -91,7 +91,7 @@ serve = "bundle exec rails s -p {port}"
 path = "~/work/front"
 fixed_port = 8080
 port_range = [8101, 8199]
-serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
+serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 ```
 
 - `path` points at the repo's main checkout and supports `~` expansion.
@@ -106,7 +106,7 @@ serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
   defaults to while `status` and the proxy keep believing it's on the
   assigned one.
 - `serve` can also reference another registered repo's port with
-  `{port:<repo>}` — `front`'s template above resolves `{port:api}` to
+  `{<repo>.port}` — `front`'s template above resolves `{api.port}` to
   whatever port `api`'s active worktree is using, allocating one if it
   doesn't have one yet. This is what lets multiple repos' worktrees stay
   wired together; see Tasks below for the full workflow.
@@ -359,7 +359,7 @@ wtshunt task use feature-x
 - `wtshunt task use <name>` validates every member's worktree still
   exists — if even one doesn't, nothing is applied — then switches all
   of them at once. Reports which members have no server running yet,
-  and warns about any already-running server whose `{port:<repo>}`
+  and warns about any already-running server whose `{<repo>.port}`
   wiring no longer matches (see below).
 - `wtshunt task list` lists tasks and their members, marking with `*`
   any task whose members all match the current active worktrees.
@@ -368,20 +368,20 @@ wtshunt task use feature-x
 **How repos actually stay wired together.** The fixed-port proxy in
 front of a service re-reads `state.json` on every request, so *that*
 part always reflects whichever worktree is currently active — no
-restart needed. A `serve` template's `{port:<repo>}` reference is
+restart needed. A `serve` template's `{<repo>.port}` reference is
 different: it's substituted once, into the literal shell command run
 when that server starts, so it's fixed for as long as that process
 keeps running. Switching `api`'s active worktree doesn't retroactively
 change what an already-running `front` process is connected to — it
 keeps talking to `api`'s old port until you restart it. This is exactly
 what `task use` checks for: if a server is still running with
-`{port:<repo>}` wiring that no longer matches, it prints a warning
+`{<repo>.port}` wiring that no longer matches, it prints a warning
 telling you to `wtshunt stop <repo> && wtshunt serve <repo>` to pick up
 the new one. A worktree that was never running in the first place picks
 up the correct wiring automatically the first time you `serve` it.
 
 If `front` also has a checked-in `.env` with its own `API_URL`, the
-`API_URL={port:api}` prefix in the `serve` template only wins if your
+`API_URL={api.port}` prefix in the `serve` template only wins if your
 framework's `.env` loader treats already-set environment variables as
 authoritative and doesn't overwrite them — the common default for most
 dotenv implementations, but worth confirming once for your stack.
@@ -403,7 +403,7 @@ There is no build step — the CLI runs the TypeScript in `src/` directly
 via tsx. `src/commands/*.ts` hold one subcommand handler each;
 `src/proxy.ts` is the reverse-proxy implementation itself
 (`src/commands/proxy.ts` is its thin CLI wrapper). `src/portRefs.ts`
-resolves `{port:<repo>}` references, `src/tasks.ts` holds the wiring-
+resolves `{<repo>.port}` references, `src/tasks.ts` holds the wiring-
 mismatch and task-matching logic, and `src/picker.ts` is the peco/
 numbered-prompt picker shared by `use` and `task add`. `src/overview.ts`
 collects the data behind both `status` and `status --json`; `src/mux.ts`

@@ -4,7 +4,7 @@ export interface WiringMismatch {
   /** The repo whose running server has stale wiring. */
   repo: string;
   worktree: string;
-  /** The repo it was wired to via `{port:refRepo}` at serve time. */
+  /** The repo it was wired to via `{refRepo.port}` at serve time. */
   refRepo: string;
   recordedPort: number;
   /** What refRepo's active worktree is *currently* wired to, if anything. */
@@ -22,7 +22,7 @@ export function currentActivePort(state: State, repoName: string): number | unde
 }
 
 /**
- * Finds running servers among `repoNames` whose recorded `{port:ref}`
+ * Finds running servers among `repoNames` whose recorded `{ref.port}`
  * resolutions no longer match what their referenced repo's active worktree
  * currently resolves to — i.e. something (typically `task use`) moved a
  * referenced repo's active worktree out from under an already-running

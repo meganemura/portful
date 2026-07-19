@@ -12,7 +12,7 @@ function makeConfig(): Config {
         path: '/repo/front',
         fixedPort: 8080,
         portRange: [41400, 41410],
-        serve: 'API={port:api} run -p {port}',
+        serve: 'API={api.port} run -p {port}',
       },
     },
   };
@@ -22,16 +22,16 @@ function makeState(): State {
   return { repos: {}, tasks: {} };
 }
 
-test('parsePortRefs: finds every distinct {port:<repo>} reference', () => {
-  assert.deepEqual(parsePortRefs('API={port:api} PORT={port} OTHER={port:api} X={port:cache}'), ['api', 'cache']);
+test('parsePortRefs: finds every distinct {<repo>.port} reference', () => {
+  assert.deepEqual(parsePortRefs('API={api.port} PORT={port} OTHER={api.port} X={cache.port}'), ['api', 'cache']);
   assert.deepEqual(parsePortRefs('no refs here, just {port}'), []);
 });
 
-test('parsePortRefs: {port:api} does not satisfy a bare {port} substring check', () => {
+test('parsePortRefs: {api.port} does not satisfy a bare {port} substring check', () => {
   // Confirms the ordering note in portRefs.ts/config.ts holds: a template
-  // relying solely on {port:api} would still need its own bare {port} to
+  // relying solely on {api.port} would still need its own bare {port} to
   // pass config validation, since the two never collide.
-  assert.equal('API={port:api}'.includes('{port}'), false);
+  assert.equal('API={api.port}'.includes('{port}'), false);
 });
 
 test("resolvePortRef: expands to the referenced repo's existing sticky port", async () => {
@@ -77,14 +77,14 @@ test('resolvePortRef: throws when the referenced repo has no active worktree', a
   await assert.rejects(() => resolvePortRef(config, state, 'api'), /no active worktree/);
 });
 
-test('applyPortRefs: substitutes {port:<repo>} without touching a bare {port}', () => {
-  const result = applyPortRefs('API={port:api} PORT={port}', { api: 41305 });
+test('applyPortRefs: substitutes {<repo>.port} without touching a bare {port}', () => {
+  const result = applyPortRefs('API={api.port} PORT={port}', { api: 41305 });
   assert.equal(result, 'API=41305 PORT={port}');
 });
 
-test('serve command ordering: {port:<repo>} refs are substituted before the bare {port}', () => {
+test('serve command ordering: {<repo>.port} refs are substituted before the bare {port}', () => {
   const resolvedRefs = { api: 41305 };
-  const template = 'API={port:api} PORT={port}';
+  const template = 'API={api.port} PORT={port}';
   const afterRefs = applyPortRefs(template, resolvedRefs);
   const final = afterRefs.replaceAll('{port}', '41401');
   assert.equal(final, 'API=41305 PORT=41401');

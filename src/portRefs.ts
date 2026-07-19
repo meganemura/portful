@@ -2,9 +2,9 @@ import type { Config } from './config.ts';
 import { allocatePort } from './ports.ts';
 import { ensureRepoState, type State } from './state.ts';
 
-const PORT_REF_PATTERN = /\{port:([A-Za-z0-9_-]+)\}/g;
+const PORT_REF_PATTERN = /\{([A-Za-z0-9_-]+)\.port\}/g;
 
-/** Every distinct repo name referenced via `{port:<repo>}` in a serve template. */
+/** Every distinct repo name referenced via `{<repo>.port}` in a serve template. */
 export function parsePortRefs(template: string): string[] {
   const names = new Set<string>();
   for (const match of template.matchAll(PORT_REF_PATTERN)) {
@@ -14,11 +14,11 @@ export function parsePortRefs(template: string): string[] {
 }
 
 /**
- * Resolves what a `{port:refRepoName}` reference expands to: the sticky
+ * Resolves what a `{refRepoName.port}` reference expands to: the sticky
  * port for `refRepoName`'s current active worktree, allocating and
  * persisting one on the spot if it doesn't have one yet. Must be called
  * inside the same `withState` transaction as the serving repo's own port
- * allocation, so both land in a single atomic write — otherwise a crash
+ * allocation, so both land in a single atomic write together — otherwise a crash
  * between the two could leave the referenced repo's port assigned but the
  * server entry that depends on it never recorded, or vice versa.
  */
@@ -27,7 +27,7 @@ export async function resolvePortRef(config: Config, state: State, refRepoName: 
   if (!refRepoConfig) {
     const names = Object.keys(config.repos);
     throw new Error(
-      `serve template references unknown repo "${refRepoName}" via {port:${refRepoName}}. ` +
+      `serve template references unknown repo "${refRepoName}" via {${refRepoName}.port}. ` +
         `Registered repos: ${names.length > 0 ? names.join(', ') : '(none)'}`
     );
   }
@@ -36,7 +36,7 @@ export async function resolvePortRef(config: Config, state: State, refRepoName: 
   const activeWorktree = refState.active;
   if (!activeWorktree) {
     throw new Error(
-      `Cannot resolve {port:${refRepoName}}: repo "${refRepoName}" has no active worktree. ` +
+      `Cannot resolve {${refRepoName}.port}: repo "${refRepoName}" has no active worktree. ` +
         `Run "wtshunt use ${refRepoName}/<worktree>" or "wtshunt task use <name>" first.`
     );
   }
@@ -56,15 +56,15 @@ export async function resolvePortRef(config: Config, state: State, refRepoName: 
 }
 
 /**
- * Substitutes every `{port:<repo>}` reference before the plain `{port}`
- * placeholder is substituted elsewhere: `{port:api}` does not itself
+ * Substitutes every `{<repo>.port}` reference before the plain `{port}`
+ * placeholder is substituted elsewhere: `{api.port}` does not itself
  * contain the substring `{port}`, so the two never collide, but resolving
  * references first keeps the two substitutions clearly separate.
  */
 export function applyPortRefs(template: string, resolvedRefs: Record<string, number>): string {
   let result = template;
   for (const [name, port] of Object.entries(resolvedRefs)) {
-    result = result.replaceAll(`{port:${name}}`, String(port));
+    result = result.replaceAll(`{${name}.port}`, String(port));
   }
   return result;
 }

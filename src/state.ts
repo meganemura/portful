@@ -9,7 +9,7 @@ export interface ServerEntry {
   port: number;
   pid: number;
   /**
-   * Ports resolved from `{port:<repo>}` references in the serve template at
+   * Ports resolved from `{<repo>.port}` references in the serve template at
    * the time this server was started, keyed by the referenced repo name.
    * Omitted entirely when the template has no such references.
    */

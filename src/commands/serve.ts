@@ -38,7 +38,7 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     const port = await allocatePort({ worktree: targetName, portRange: repoConfig.portRange, stickyPorts: rs.ports });
     rs.ports[targetName] = port;
 
-    // {port:<repo>} references resolve inside this same transaction, so a
+    // {<repo>.port} references resolve inside this same transaction, so a
     // referenced repo's port allocation and this server's own land in one
     // atomic write together.
     const resolvedRefs: Record<string, number> = {};
@@ -57,7 +57,7 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   }
 
   const { port, resolvedRefs } = allocation;
-  // {port:<repo>} references are substituted before the plain {port}
+  // {<repo>.port} references are substituted before the plain {port}
   // placeholder (see portRefs.ts for why the two can't collide).
   const serveCmd = applyPortRefs(repoConfig.serve, resolvedRefs).replaceAll('{port}', String(port));
 

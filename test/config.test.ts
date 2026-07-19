@@ -129,7 +129,7 @@ test('config: serve template missing {port} throws a validation error', async ()
   }
 });
 
-test('config: a template with both {port:<repo>} and {port} passes validation', async () => {
+test('config: a template with both {<repo>.port} and {port} passes validation', async () => {
   const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-port-ref-'));
   try {
     await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
@@ -146,21 +146,21 @@ test('config: a template with both {port:<repo>} and {port} passes validation', 
         'path = "/tmp/front"',
         'fixed_port = 8080',
         'port_range = [8101, 8199]',
-        'serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"',
+        'serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"',
         '',
       ].join('\n')
     );
 
     await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
       const config = await loadConfig();
-      assert.equal(config.repos.front.serve, 'API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev');
+      assert.equal(config.repos.front.serve, 'API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev');
     });
   } finally {
     await rm(configDirRoot, { recursive: true, force: true });
   }
 });
 
-test('config: a template with only {port:<repo>} and no bare {port} still fails validation', async () => {
+test('config: a template with only {<repo>.port} and no bare {port} still fails validation', async () => {
   const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-port-ref-only-'));
   try {
     await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
@@ -171,7 +171,7 @@ test('config: a template with only {port:<repo>} and no bare {port} still fails 
         'path = "/tmp/front"',
         'fixed_port = 8080',
         'port_range = [8101, 8199]',
-        'serve = "API_URL=http://127.0.0.1:{port:api} npm run dev"',
+        'serve = "API_URL=http://127.0.0.1:{api.port} npm run dev"',
         '',
       ].join('\n')
     );
