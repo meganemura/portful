@@ -238,6 +238,19 @@ multiplexer is available; with none detected, the command is printed for
 you to run by hand instead. See "Opening panes from `wtshunt ui`" for
 how the multiplexer is chosen. Requires an interactive terminal (TTY).
 
+### `wtshunt whoami`
+
+Reports which repo and worktree the current directory is in, as a single
+line meant for embedding in a shell prompt or for an agent to confirm its
+own footing: `api/feature-x port 3101 (running, active)`. The port is
+omitted if that worktree has never been served, and `, active` only
+appears if it's the repo's current active worktree. `--json` prints the
+full detail (branch, path, running server, proxy routing) instead. Errors
+and exits non-zero if the current directory isn't inside any registered
+repo — pair with `2>/dev/null` in a prompt to fail silently there.
+
+Tip: `wtshunt whoami 2>/dev/null` is safe to drop straight into `PS1`.
+
 ### `wtshunt help [command]`
 
 Shows the same thing as `wtshunt --help`; with a command name, shows that
@@ -286,7 +299,8 @@ newly added repos or worktrees complete right away without reinstalling
 anything:
 
 - With nothing typed yet, it suggests command names (`use`, `serve`,
-  `run`, `status`, `stop`, `proxy`, `task`, `ui`, `help`, `completion`).
+  `run`, `status`, `stop`, `proxy`, `task`, `ui`, `whoami`, `help`,
+  `completion`).
 - As the first argument to `use`, `serve`, `stop`, `proxy`, or `run`, it
   suggests every repo name and every `repo/worktree` name, so
   `run <Tab>` lists them all and `run api/<Tab>` narrows to worktrees of

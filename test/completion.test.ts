@@ -101,6 +101,7 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'proxy',
       'task',
       'ui',
+      'whoami',
       'help',
       'completion',
     ]);
@@ -127,7 +128,19 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
     // "wtshunt <Tab>": rest = [wtshunt, ''] (bash always appends the current
     // word, empty or not), COMP_CWORD=1 points at that empty element.
     const topLevel = await getCompletions(configDir, [''], 1);
-    assert.deepEqual(topLevel, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'help', 'completion']);
+    assert.deepEqual(topLevel, [
+      'use',
+      'serve',
+      'run',
+      'status',
+      'stop',
+      'proxy',
+      'task',
+      'ui',
+      'whoami',
+      'help',
+      'completion',
+    ]);
 
     // "wtshunt use <Tab>": rest = [wtshunt, use, ''], COMP_CWORD=2.
     const afterUse = await getCompletions(configDir, ['use', ''], 2);
@@ -226,7 +239,7 @@ test('completion: after "help", suggests command names (excluding help itself)',
   const { base, configDir } = await makeRepoFixture();
   try {
     const afterHelp = await getCompletions(configDir, ['help'], 2);
-    assert.deepEqual(afterHelp, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'completion']);
+    assert.deepEqual(afterHelp, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'whoami', 'completion']);
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });

@@ -132,6 +132,81 @@ export async function resolveRepoFromCwd(config: Config, cwd: string): Promise<s
   );
 }
 
+export interface CwdWorktreeMatch {
+  repoName: string;
+  worktree: WorktreeInfo;
+}
+
+/**
+ * Determines which repo *and* which of its worktrees `cwd` is nested
+ * under (worktree-granular sibling of `resolveRepoFromCwd`). `git
+ * worktree list` always reports the main checkout as one of its own
+ * entries, so listing each repo's worktrees alone is enough — no need to
+ * check `repoConfig.path` separately.
+ */
+export async function resolveWorktreeFromCwd(config: Config, cwd: string): Promise<CwdWorktreeMatch> {
+  const realCwd = await realpath(cwd);
+
+  for (const [name, repoConfig] of Object.entries(config.repos)) {
+    let worktrees: WorktreeInfo[];
+    try {
+      worktrees = await listWorktrees(repoConfig.path);
+    } catch {
+      continue;
+    }
+
+    for (const wt of worktrees) {
+      let realWtPath: string;
+      try {
+        realWtPath = await realpath(wt.path);
+      } catch {
+        continue;
+      }
+      if (isUnderOrEqual(realCwd, realWtPath)) {
+        return { repoName: name, worktree: wt };
+      }
+    }
+  }
+
+  const names = Object.keys(config.repos);
+  throw new Error(
+    `Could not determine repo from current directory (${cwd}).\n` +
+      `Registered repos: ${names.length > 0 ? names.join(', ') : '(none)'}`
+  );
+}
+
+/**
+ * Builds a one-line warning for `run`/`serve` when the target worktree was
+ * decided by the repo's `active` pointer (repo omitted or given bare, with
+ * no explicit `/worktree`) but `cwd` actually sits in a *different*
+ * worktree of that same repo — the classic "I cd'ed into task-b but
+ * active is still task-a" trap. Returns `undefined` when there's nothing
+ * to warn about: cwd isn't in any registered worktree, is in a different
+ * repo entirely, or already matches the active worktree.
+ */
+export async function cwdActiveMismatchWarning(
+  config: Config,
+  cwd: string,
+  repoName: string,
+  activeWorktreeName: string
+): Promise<string | undefined> {
+  let match: CwdWorktreeMatch;
+  try {
+    match = await resolveWorktreeFromCwd(config, cwd);
+  } catch {
+    return undefined;
+  }
+
+  if (match.repoName !== repoName || match.worktree.name === activeWorktreeName) {
+    return undefined;
+  }
+
+  return (
+    `Note: cwd is in ${repoName}/${match.worktree.name}, but this runs in the active worktree ` +
+    `${repoName}/${activeWorktreeName}.`
+  );
+}
+
 export interface ResolvedRepo {
   repoName: string;
   worktreeName?: string;

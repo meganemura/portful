@@ -196,6 +196,19 @@ experimental な複数リポジトリ向けプリセットです。
 どのマルチプレクサで開くかは「`wtshunt ui` からのペインの開き方」を参照してください。
 対話的なターミナル(TTY)が必要です。
 
+### `wtshunt whoami`
+
+カレントディレクトリがどのリポジトリ・worktree に属しているかを1行で報告します。
+シェルのプロンプトへの埋め込みや、エージェントが自分の足場を確認する用途を想定しています。
+例: `api/feature-x port 3101 (running, active)`。
+その worktree が一度も serve されていなければポート部分は省略されます。
+そのリポジトリの現在のアクティブ worktree でなければ `, active` は付きません。
+`--json` を付けると詳細情報(ブランチ、パス、稼働中サーバ、プロキシの転送先)を出力します。
+カレントディレクトリが登録済みリポジトリのどれにも属していなければエラーになり、exit 1 で終了します。
+プロンプトに埋め込む場合は `2>/dev/null` を付けて黙らせられます。
+
+Tip: `wtshunt whoami 2>/dev/null` はそのまま `PS1` に埋め込めます。
+
 ### `wtshunt help [command]`
 
 `wtshunt --help` と同じ内容を表示します。
@@ -229,7 +242,7 @@ experimental な複数リポジトリ向けプリセットです。
 `wtshunt completion` は、実行しているシェルに合わせた補完スクリプトを出力します。
 補完候補は `<Tab>` のたびに動的に計算されるため、リポジトリや worktree を後から追加しても、再インストールなしで即座に補完されます:
 
-- 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、`status`、`stop`、`proxy`、`task`、`ui`、`help`、`completion`)を提案します。
+- 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、`status`、`stop`、`proxy`、`task`、`ui`、`whoami`、`help`、`completion`)を提案します。
 - `use`、`serve`、`stop`、`proxy`、`run` の第1引数では、すべてのリポジトリ名と `repo/worktree` 名を提案します。
   `run <Tab>` で全候補が並び、`run api/<Tab>` で `api` の worktree に絞り込まれます。
   `help` の引数ではコマンド名を提案します。

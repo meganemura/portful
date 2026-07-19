@@ -11,6 +11,7 @@ import { stopCommand } from './commands/stop.ts';
 import { proxyCommand } from './commands/proxy.ts';
 import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from './commands/task.ts';
 import { uiCommand } from './commands/ui.ts';
+import { whoamiCommand } from './commands/whoami.ts';
 
 /**
  * Flat list of every repo name plus every `repo/worktree` name across all
@@ -200,7 +201,7 @@ const repoPositional = (y: Argv) =>
     describe: 'repo, or repo/worktree to target directly',
   });
 
-const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'help', 'completion'];
+const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'whoami', 'help', 'completion'];
 
 /** Commands whose first argument is a `repo` or `repo/worktree` name. */
 const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'proxy', 'run']);
@@ -338,6 +339,19 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       () => {},
       handle(async () => {
         await uiCommand();
+      })
+    )
+    .command(
+      'whoami',
+      'Show which repo/worktree the current directory is in',
+      (y) =>
+        y.option('json', {
+          type: 'boolean',
+          default: false,
+          describe: 'Print machine-readable JSON instead of the one-line summary',
+        }),
+      handle(async (argv) => {
+        await whoamiCommand({ json: argv.json as boolean });
       })
     )
     .command(

@@ -5,7 +5,14 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { findWorktree, listWorktrees, parseWorktreePorcelain, resolveRepoFromCwd } from '../src/repo.ts';
+import {
+  cwdActiveMismatchWarning,
+  findWorktree,
+  listWorktrees,
+  parseWorktreePorcelain,
+  resolveRepoFromCwd,
+  resolveWorktreeFromCwd,
+} from '../src/repo.ts';
 import type { Config } from '../src/config.ts';
 
 const execFileAsync = promisify(execFile);
@@ -73,6 +80,77 @@ test('repo: resolves repo from cwd through a symlink into a worktree subdirector
 
     const repoName = await resolveRepoFromCwd(config, linkPath);
     assert.equal(repoName, 'b');
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('resolveWorktreeFromCwd: resolves repo and worktree separately for the main checkout and a linked worktree', async () => {
+  const { main, base, worktree } = await makeGitRepoWithWorktree();
+  try {
+    const config: Config = {
+      repos: {
+        b: { path: main, fixedPort: 3000, portRange: [3101, 3199], serve: 'echo {port}' },
+      },
+    };
+
+    const inMain = await resolveWorktreeFromCwd(config, main);
+    assert.equal(inMain.repoName, 'b');
+    assert.equal(inMain.worktree.name, 'main');
+
+    const inWorktree = await resolveWorktreeFromCwd(config, worktree);
+    assert.equal(inWorktree.repoName, 'b');
+    assert.equal(inWorktree.worktree.name, 'feature-auth');
+    assert.equal(inWorktree.worktree.branch, 'feature/auth');
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('resolveWorktreeFromCwd: throws with the list of registered repos when cwd matches nothing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-unrelated-'));
+  try {
+    const config: Config = {
+      repos: {
+        b: { path: '/nonexistent/repo', fixedPort: 3000, portRange: [3101, 3199], serve: 'echo {port}' },
+      },
+    };
+    await assert.rejects(
+      () => resolveWorktreeFromCwd(config, dir),
+      (err: Error) => {
+        assert.match(err.message, /Registered repos: b/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('cwdActiveMismatchWarning: warns only when cwd is in a different worktree of the same repo than active', async () => {
+  const { main, base, worktree } = await makeGitRepoWithWorktree();
+  try {
+    const config: Config = {
+      repos: {
+        b: { path: main, fixedPort: 3000, portRange: [3101, 3199], serve: 'echo {port}' },
+      },
+    };
+
+    // cwd (feature-auth) differs from active (main): warns.
+    const warning = await cwdActiveMismatchWarning(config, worktree, 'b', 'main');
+    assert.match(warning ?? '', /cwd is in b\/feature-auth/);
+    assert.match(warning ?? '', /active worktree b\/main/);
+
+    // cwd matches active: no warning.
+    assert.equal(await cwdActiveMismatchWarning(config, main, 'b', 'main'), undefined);
+
+    // cwd isn't in any registered worktree at all: no warning.
+    const outside = await mkdtemp(join(tmpdir(), 'wtshunt-unrelated-'));
+    try {
+      assert.equal(await cwdActiveMismatchWarning(config, outside, 'b', 'main'), undefined);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   } finally {
     await rm(base, { recursive: true, force: true });
   }
