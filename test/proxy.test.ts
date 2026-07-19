@@ -244,3 +244,42 @@ test('proxy: WebSocket upgrade 502s when the active worktree has no server', asy
     }
   });
 });
+
+test('proxy: close() does not wait for held connections', async () => {
+  await withTempState(async () => {
+    // Backend that starts streaming and never ends the response (SSE-like).
+    const backend = await new Promise<{ server: Server; port: number }>((resolvePromise) => {
+      const server = createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.write('data: tick\n\n');
+      });
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        const port = typeof address === 'object' && address ? address.port : 0;
+        resolvePromise({ server, port });
+      });
+    });
+
+    await withState((state) => {
+      const rs = ensureRepoState(state, 'b');
+      rs.active = 'wt-a';
+      rs.servers['wt-a'] = { path: '/x', branch: 'a', port: backend.port, pid: process.pid };
+    });
+
+    const repoConfig: RepoConfig = { path: '/repo', fixedPort: 0, portRange: [0, 0], serve: '' };
+    const handle = await startProxy({ repoName: 'b', repoConfig });
+
+    const held = connect(handle.port, '127.0.0.1');
+    held.on('error', () => {});
+    held.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n');
+    await new Promise<void>((resolvePromise) => held.once('data', () => resolvePromise()));
+
+    const t0 = Date.now();
+    await handle.close();
+    assert.ok(Date.now() - t0 < 1500, `close() took ${Date.now() - t0}ms with a held connection`);
+
+    held.destroy();
+    backend.server.closeAllConnections();
+    await closeHttpServer(backend.server);
+  });
+});

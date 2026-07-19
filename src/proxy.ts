@@ -44,6 +44,11 @@ export async function startProxy(options: StartProxyOptions): Promise<ProxyHandl
     close: () =>
       new Promise<void>((resolvePromise) => {
         server.close(() => resolvePromise());
+        // Don't wait for held connections (SSE streams, WebSocket tunnels):
+        // server.close() alone blocks until every client disconnects, which
+        // would leave Ctrl-C hanging for as long as a browser keeps an
+        // EventSource or socket open.
+        server.closeAllConnections();
       }),
   };
 }
