@@ -103,6 +103,7 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'ui',
       'whoami',
       'prune',
+      'doctor',
       'help',
       'completion',
     ]);
@@ -140,6 +141,7 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
       'ui',
       'whoami',
       'prune',
+      'doctor',
       'help',
       'completion',
     ]);
@@ -267,6 +269,7 @@ test('completion: after "help", suggests command names (excluding help itself)',
       'ui',
       'whoami',
       'prune',
+      'doctor',
       'completion',
     ]);
   } finally {

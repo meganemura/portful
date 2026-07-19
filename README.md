@@ -285,12 +285,27 @@ that member removed (the whole task if that empties it). `--dry-run`
 (`-n`) prints what would change without touching anything; with
 nothing to clean up, it prints a single `Nothing to prune.` line.
 
+### `wtshunt doctor`
+
+A read-only diagnostic report, plain text and safe to paste somewhere
+like Slack: wtshunt's own version (with commit hash) plus Node and
+platform, whether the config loads and each repo's path/git-ness/worktree
+count, whether every `fixed_port` and sticky port's actual `lsof` LISTEN
+state matches what `state.json` expects, any stale entries `wtshunt
+prune` would clean up, and which picker/multiplexer would be
+auto-detected. Never crashes on a broken config — it reports that as a
+finding instead — and exits non-zero if anything looks off, so it's
+usable as a quick health check from a script.
+
 ### `wtshunt help [command]`
 
 Shows the same thing as `wtshunt --help`; with a command name, shows that
 command's own help (equivalent to `wtshunt <command> --help`).
 
 ## Limitations and troubleshooting
+
+Start with `wtshunt doctor` — it's a quick, read-only pass over config,
+ports, and state that catches most of what's below on its own.
 
 - **WebSockets route on connect, not on switch.** An Upgrade request
   (Rails ActionCable, Vite/webpack HMR) is forwarded to whichever
@@ -334,7 +349,7 @@ anything:
 
 - With nothing typed yet, it suggests command names (`use`, `serve`,
   `run`, `status`, `stop`, `proxy`, `task`, `ui`, `whoami`, `prune`,
-  `help`, `completion`).
+  `doctor`, `help`, `completion`).
 - As the first argument to `use`, `serve`, `stop`, `proxy`, or `run`, it
   suggests every repo name and every `repo/worktree` name, so
   `run <Tab>` lists them all and `run api/<Tab>` narrows to worktrees of
@@ -485,9 +500,9 @@ implements the multiplexer adapters `wtshunt ui` opens `serve`/`proxy`
 through; `src/ui/` holds `wtshunt ui`'s row-model, key-dispatch, and
 rendering logic (`src/commands/ui.ts` is its thin terminal/event-loop
 wrapper). `src/prune.ts` detects state entries left behind by worktrees
-that no longer exist — shared by `wtshunt prune` and `status`/`ui`'s
-"(worktree gone)" marker. Runtime state lives in
-`$XDG_STATE_HOME/wtshunt/state.json` (default
+that no longer exist — shared by `wtshunt prune`, `wtshunt doctor`'s
+state section, and `status`/`ui`'s "(worktree gone)" marker. Runtime
+state lives in `$XDG_STATE_HOME/wtshunt/state.json` (default
 `~/.local/state/wtshunt/state.json`).
 
 ## License

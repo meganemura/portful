@@ -231,12 +231,23 @@ sticky なポート割り当てを削除します。
 `--dry-run`(`-n`)を付けると、何も変更せずに変更予定の内容だけを表示します。
 掃除するものが無ければ `Nothing to prune.` の一行だけ表示します。
 
+### `wtshunt doctor`
+
+読み取り専用の診断レポートです。
+プレーンテキストなので、Slack などにそのまま貼り付けられます。
+wtshunt 自身のバージョン(commit hash 付き)、Node と platform、設定が読み込めるかと各リポジトリのパス・git リポジトリかどうか・worktree 数、各 `fixed_port` と sticky ポートについて実際の `lsof` の LISTEN 状況が `state.json` の想定と一致しているか、`wtshunt prune` が掃除するはずの stale なエントリの有無、自動検出されるピッカーとマルチプレクサを出力します。
+設定が壊れていてもクラッシュせず、その事実自体を診断結果として報告します。
+何か問題があれば exit 1、無ければ exit 0 になるため、スクリプトからの簡易ヘルスチェックにも使えます。
+
 ### `wtshunt help [command]`
 
 `wtshunt --help` と同じ内容を表示します。
 コマンド名を付けると、そのコマンド自体のヘルプ(`wtshunt <command> --help` 相当)を表示します。
 
 ## 制約とトラブルシューティング
+
+まず `wtshunt doctor` を実行してください。
+設定・ポート・state を読み取り専用でひと通り確認するだけで、下記のほとんどの原因が分かります。
 
 - **WebSocket は接続時にルーティングされ、切り替え時には動かない。**
   upgrade リクエスト(Rails ActionCable、Vite/webpack の HMR)は、接続が開かれた時点でアクティブな worktree に転送されます。
@@ -264,7 +275,7 @@ sticky なポート割り当てを削除します。
 `wtshunt completion` は、実行しているシェルに合わせた補完スクリプトを出力します。
 補完候補は `<Tab>` のたびに動的に計算されるため、リポジトリや worktree を後から追加しても、再インストールなしで即座に補完されます:
 
-- 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、`status`、`stop`、`proxy`、`task`、`ui`、`whoami`、`prune`、`help`、`completion`)を提案します。
+- 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、`status`、`stop`、`proxy`、`task`、`ui`、`whoami`、`prune`、`doctor`、`help`、`completion`)を提案します。
 - `use`、`serve`、`stop`、`proxy`、`run` の第1引数では、すべてのリポジトリ名と `repo/worktree` 名を提案します。
   `run <Tab>` で全候補が並び、`run api/<Tab>` で `api` の worktree に絞り込まれます。
   `prune` の第1引数では、リポジトリ名のみを提案します(prune はリポジトリ単位が対象なので `repo/worktree` の形式は出しません)。
@@ -373,7 +384,7 @@ CLI は tsx 経由で `src/` の TypeScript を直接実行します。
 `src/portRefs.ts` が `{<repo>.port}` の解決、`src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、`src/picker.ts` が `use` と `task add` で共有するピッカー(`[picker]` の設定、無ければ peco/fzf の自動検出、それも無ければ番号選択)です。
 `src/overview.ts` が `status`/`status --json` 双方の元データを集約します。
 `src/mux.ts` が `wtshunt ui` の `serve`/`proxy` 起動に使うマルチプレクサアダプタの実装、`src/ui/` が `wtshunt ui` の行モデル、キー処理、描画のロジックです(`src/commands/ui.ts` はその薄いターミナル/イベントループラッパー)。
-`src/prune.ts` はもう存在しない worktree が残した state エントリの検出ロジックで、`wtshunt prune` と `status`/`ui` の `(worktree gone)` 印で共有しています。
+`src/prune.ts` はもう存在しない worktree が残した state エントリの検出ロジックで、`wtshunt prune`、`wtshunt doctor` の state セクション、`status`/`ui` の `(worktree gone)` 印で共有しています。
 実行時の state は `$XDG_STATE_HOME/wtshunt/state.json`(デフォルトは `~/.local/state/wtshunt/state.json`)に置かれます。
 
 ## ライセンス

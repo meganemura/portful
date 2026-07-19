@@ -13,6 +13,7 @@ import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from '
 import { uiCommand } from './commands/ui.ts';
 import { whoamiCommand } from './commands/whoami.ts';
 import { pruneCommand } from './commands/prune.ts';
+import { doctorCommand } from './commands/doctor.ts';
 import { formatVersionString, readCommitHash, readPackageVersion, resolveRepoRootFromBin } from './version.ts';
 
 /**
@@ -224,6 +225,7 @@ const COMMAND_NAMES = [
   'ui',
   'whoami',
   'prune',
+  'doctor',
   'help',
   'completion',
 ];
@@ -408,6 +410,14 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
           }),
       handle(async (argv) => {
         await pruneCommand({ repo: argv.repo as string | undefined, dryRun: argv.dryRun as boolean });
+      })
+    )
+    .command(
+      'doctor',
+      'Print a read-only diagnostic report (config, ports, state, environment)',
+      () => {},
+      handle(async () => {
+        await doctorCommand();
       })
     )
     .command(
