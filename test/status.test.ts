@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import type { State } from '../src/state.ts';
+import { ensureRepoState, withState, type State } from '../src/state.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -213,6 +213,62 @@ test('status --json / status: staleWiring appears once a referenced repo moves i
       }
     }
     await sleep(300);
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('status --json / status: marks a server whose worktree no longer exists, and status prints a prune hint', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'wtshunt-status-gone-repo-'));
+  const apiMain = join(base, 'api-main');
+  await mkdir(apiMain, { recursive: true });
+  await git(apiMain, ['init', '-q', '-b', 'main']);
+  await git(apiMain, ['config', 'user.email', 'test@example.com']);
+  await git(apiMain, ['config', 'user.name', 'Test']);
+  await writeFile(join(apiMain, 'f.txt'), 'hi');
+  await git(apiMain, ['add', '.']);
+  await git(apiMain, ['commit', '-q', '-m', 'init']);
+  const apiTaskB = join(base, 'api-task-b');
+  await git(apiMain, ['worktree', 'add', '-q', '-b', 'task-b', apiTaskB]);
+
+  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-gone-config-'));
+  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  await writeFile(
+    join(configDir, 'wtshunt', 'config.toml'),
+    ['[repos.api]', `path = "${apiMain}"`, 'fixed_port = 3000', 'port_range = [42100, 42110]', 'serve = "echo {port}"', ''].join(
+      '\n'
+    )
+  );
+
+  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-gone-state-'));
+  const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
+
+  try {
+    const original = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = stateDir;
+    try {
+      await withState((state) => {
+        const rs = ensureRepoState(state, 'api');
+        rs.ports['api-task-b'] = 42101;
+        rs.servers['api-task-b'] = { path: apiTaskB, branch: 'task-b', port: 42101, pid: process.pid };
+      });
+    } finally {
+      if (original === undefined) delete process.env.XDG_STATE_HOME;
+      else process.env.XDG_STATE_HOME = original;
+    }
+
+    await git(apiMain, ['worktree', 'remove', '--force', apiTaskB]);
+
+    const { stdout: jsonOut } = await execFileAsync(process.execPath, [binPath, 'status', '--json'], { env });
+    const overview = JSON.parse(jsonOut);
+    const api = overview.repos.find((r: { name: string }) => r.name === 'api');
+    assert.equal(api.servers['api-task-b'].worktreeGone, true);
+
+    const { stdout: textOut } = await execFileAsync(process.execPath, [binPath, 'status'], { env });
+    assert.match(textOut, /api-task-b\t.*\(worktree gone\)/);
+    assert.match(textOut, /Run "wtshunt prune" to clean up/);
+  } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });
     await rm(stateDir, { recursive: true, force: true });

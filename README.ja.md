@@ -152,8 +152,9 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 
 設定済みの各リポジトリについて、アクティブな worktree、稼働中の全サーバ(worktree、ブランチ、ポート、pid)、プロキシの稼働状況と現在の転送先を表示します。
 `{<repo>.port}` の結線が古くなっているサーバには `(stale wiring: api)` のように印が付きます(下の「タスク (experimental)」参照)。
+worktree 自体が無くなったサーバには `(worktree gone)` の印が付き、その場合は末尾に `wtshunt prune` を促す一行が出ます。
 `wtshunt status --json` は同じ内容を機械可読な JSON として出力します。
-各サーバのエントリには同じ情報を持つ `staleWiring` 配列も付きます(無ければ省略されます):
+各サーバのエントリには同じ情報を持つ `staleWiring` 配列と `worktreeGone: true` フィールドも付きます(どちらも該当しなければ省略されます):
 
 ```sh
 wtshunt status --json | jq '.repos[] | {name, active}'
@@ -197,6 +198,9 @@ experimental な複数リポジトリ向けプリセットです。
 - **`p`**：その行のリポジトリのプロキシをトグルします。稼働中なら停止、停止中なら起動します。
 - **`q` / `Ctrl-C`**：終了します。
 
+worktree 自体が無くなったサーバにも行が表示されます(`(worktree gone)` の印付き)。
+`wtshunt prune` を別途実行しなくても、その場で `x` を押して停止できます。
+
 画面は数秒おきに自動更新され、各操作の直後にも更新されます。
 `serve`/`proxy` は常に UI 自身とは別のプロセスとして、別のペイン、タブ、ウィンドウで開かれます。
 どのマルチプレクサで開くかは「`wtshunt ui` からのペインの開き方」を参照してください。
@@ -214,6 +218,18 @@ experimental な複数リポジトリ向けプリセットです。
 プロンプトに埋め込む場合は `2>/dev/null` を付けて黙らせられます。
 
 Tip: `wtshunt whoami 2>/dev/null` はそのまま `PS1` に埋め込めます。
+
+### `wtshunt prune [repo]`
+
+もう存在しない worktree(`git worktree remove` で消した、あるいは手動で削除した)が残した state を掃除します。
+`state.json` を実際の `git worktree list` の結果と突き合わせ、対象は指定した1リポジトリ、省略時は全リポジトリです。
+消えた worktree について次を行います。
+稼働中のサーバがあれば(`wtshunt stop` と同じ、`SIGTERM` を送って終了をポーリングする手順で)停止してからエントリを削除します。
+sticky なポート割り当てを削除します。
+リポジトリの `active` ポインタがその worktree を指していればクリアします。
+その worktree をメンバーに持つタスクがあれば、そのメンバーだけを外します(空になったタスクは削除します)。
+`--dry-run`(`-n`)を付けると、何も変更せずに変更予定の内容だけを表示します。
+掃除するものが無ければ `Nothing to prune.` の一行だけ表示します。
 
 ### `wtshunt help [command]`
 
@@ -248,9 +264,10 @@ Tip: `wtshunt whoami 2>/dev/null` はそのまま `PS1` に埋め込めます。
 `wtshunt completion` は、実行しているシェルに合わせた補完スクリプトを出力します。
 補完候補は `<Tab>` のたびに動的に計算されるため、リポジトリや worktree を後から追加しても、再インストールなしで即座に補完されます:
 
-- 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、`status`、`stop`、`proxy`、`task`、`ui`、`whoami`、`help`、`completion`)を提案します。
+- 何も入力していない状態では、コマンド名(`use`、`serve`、`run`、`status`、`stop`、`proxy`、`task`、`ui`、`whoami`、`prune`、`help`、`completion`)を提案します。
 - `use`、`serve`、`stop`、`proxy`、`run` の第1引数では、すべてのリポジトリ名と `repo/worktree` 名を提案します。
   `run <Tab>` で全候補が並び、`run api/<Tab>` で `api` の worktree に絞り込まれます。
+  `prune` の第1引数では、リポジトリ名のみを提案します(prune はリポジトリ単位が対象なので `repo/worktree` の形式は出しません)。
   `help` の引数ではコマンド名を提案します。
 - `task` の後は `add`/`use`/`list`/`rm` を、`task use` や `task rm` の後は定義済みのタスク名を提案します。
   `task add <name>` の後は、`run` などと同じ repo/worktree の候補にフォールバックします。
@@ -356,6 +373,7 @@ CLI は tsx 経由で `src/` の TypeScript を直接実行します。
 `src/portRefs.ts` が `{<repo>.port}` の解決、`src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、`src/picker.ts` が `use` と `task add` で共有するピッカー(`[picker]` の設定、無ければ peco/fzf の自動検出、それも無ければ番号選択)です。
 `src/overview.ts` が `status`/`status --json` 双方の元データを集約します。
 `src/mux.ts` が `wtshunt ui` の `serve`/`proxy` 起動に使うマルチプレクサアダプタの実装、`src/ui/` が `wtshunt ui` の行モデル、キー処理、描画のロジックです(`src/commands/ui.ts` はその薄いターミナル/イベントループラッパー)。
+`src/prune.ts` はもう存在しない worktree が残した state エントリの検出ロジックで、`wtshunt prune` と `status`/`ui` の `(worktree gone)` 印で共有しています。
 実行時の state は `$XDG_STATE_HOME/wtshunt/state.json`(デフォルトは `~/.local/state/wtshunt/state.json`)に置かれます。
 
 ## ライセンス

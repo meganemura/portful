@@ -82,6 +82,50 @@ test('buildRows: one repo header row, then its worktree rows, then task rows at 
   }
 });
 
+test('buildRows: synthesizes an extra worktree row for a server whose worktree no longer exists', () => {
+  const overview: Overview = {
+    repos: [
+      {
+        name: 'api',
+        path: '/repos/api',
+        fixedPort: 3000,
+        worktrees: [{ name: 'api-main', branch: 'main', path: '/repos/api-main' }],
+        active: 'api-gone',
+        ports: { 'api-main': 3101, 'api-gone': 3105 },
+        servers: {
+          'api-main': { branch: 'main', port: 3101, pid: 111 },
+          'api-gone': { branch: 'gone-branch', port: 3105, pid: 222 },
+        },
+      },
+    ],
+    tasks: [],
+  };
+
+  const rows = buildRows(overview);
+  assert.deepEqual(
+    rows.map((r) => r.kind),
+    ['repo', 'worktree', 'worktree']
+  );
+
+  const orphanRow = rows[2];
+  assert.equal(orphanRow.kind, 'worktree');
+  if (orphanRow.kind === 'worktree') {
+    assert.equal(orphanRow.repo, 'api');
+    assert.equal(orphanRow.worktree, 'api-gone');
+    assert.equal(orphanRow.branch, 'gone-branch');
+    assert.equal(orphanRow.port, 3105);
+    assert.equal(orphanRow.pid, 222);
+    assert.equal(orphanRow.active, true);
+    assert.equal(orphanRow.worktreeGone, true);
+  }
+
+  const normalRow = rows[1];
+  assert.equal(normalRow.kind, 'worktree');
+  if (normalRow.kind === 'worktree') {
+    assert.equal(normalRow.worktreeGone, undefined);
+  }
+});
+
 test('moveSelection: clamps at both ends and handles an empty row list', () => {
   const rows = buildRows(OVERVIEW);
   assert.equal(moveSelection(rows, 0, -1), 0);

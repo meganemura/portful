@@ -1,6 +1,7 @@
 import { loadConfig, type Config } from './config.ts';
 import { readState, type State } from './state.ts';
 import { listWorktrees } from './repo.ts';
+import { isWorktreeStale } from './prune.ts';
 import { computeStaleWiring, taskMatchesCurrentActive, type StaleWiringEntry } from './tasks.ts';
 
 export interface OverviewWorktree {
@@ -16,6 +17,8 @@ export interface OverviewServer {
   resolvedRefs?: Record<string, number>;
   /** `resolvedRefs` entries that no longer match what the referenced repo's active worktree currently resolves to. Omitted when there's none. */
   staleWiring?: StaleWiringEntry[];
+  /** True if this server's worktree no longer exists (`git worktree list` doesn't report it). Omitted when it still does. */
+  worktreeGone?: true;
 }
 
 export interface OverviewProxy {
@@ -71,6 +74,7 @@ export async function buildOverview(config?: Config, state?: State): Promise<Ove
       }
 
       const rs = st.repos[name];
+      const actualWorktreeNames = new Set(worktrees.map((wt) => wt.name));
       const servers: Record<string, OverviewServer> = {};
       for (const [wtName, entry] of Object.entries(rs?.servers ?? {})) {
         const staleWiring = computeStaleWiring(st, entry.resolvedRefs);
@@ -80,6 +84,7 @@ export async function buildOverview(config?: Config, state?: State): Promise<Ove
           pid: entry.pid,
           ...(entry.resolvedRefs ? { resolvedRefs: entry.resolvedRefs } : {}),
           ...(staleWiring.length > 0 ? { staleWiring } : {}),
+          ...(isWorktreeStale(actualWorktreeNames, wtName) ? { worktreeGone: true as const } : {}),
         };
       }
 

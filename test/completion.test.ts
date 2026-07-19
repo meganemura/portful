@@ -102,6 +102,7 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'task',
       'ui',
       'whoami',
+      'prune',
       'help',
       'completion',
     ]);
@@ -138,6 +139,7 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
       'task',
       'ui',
       'whoami',
+      'prune',
       'help',
       'completion',
     ]);
@@ -176,6 +178,21 @@ test('completion: first argument is prefix-filtered across repo and worktree nam
     // "wtshunt use b<Tab>": everything starts with "b" here, so all of them.
     const bMatches = await getCompletions(configDir, ['use', 'b'], 2);
     assert.deepEqual(bMatches.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
+  } finally {
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test('completion: prune\'s first argument suggests bare repo names only, not repo/worktree', async () => {
+  const { base, configDir } = await makeRepoFixture();
+  try {
+    const matches = await getCompletions(configDir, ['prune'], 2);
+    assert.deepEqual(matches, ['b']);
+
+    // Second argument onward for prune is unmatched, same as any command.
+    const afterRepo = await getCompletions(configDir, ['prune', 'b', ''], 3);
+    assert.deepEqual(afterRepo, []);
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });
@@ -239,7 +256,19 @@ test('completion: after "help", suggests command names (excluding help itself)',
   const { base, configDir } = await makeRepoFixture();
   try {
     const afterHelp = await getCompletions(configDir, ['help'], 2);
-    assert.deepEqual(afterHelp, ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'whoami', 'completion']);
+    assert.deepEqual(afterHelp, [
+      'use',
+      'serve',
+      'run',
+      'status',
+      'stop',
+      'proxy',
+      'task',
+      'ui',
+      'whoami',
+      'prune',
+      'completion',
+    ]);
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });

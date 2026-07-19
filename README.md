@@ -188,10 +188,12 @@ Shows, for every configured repo: the active worktree, every running
 server (worktree, branch, port, pid), and whether the proxy is running
 and what it's currently routing to. A server whose `{<repo>.port}`
 wiring has gone stale (see Tasks below) is marked inline, e.g.
-`(stale wiring: api)`. `wtshunt status --json` prints the same data as
+`(stale wiring: api)`, and one whose worktree no longer exists is marked
+`(worktree gone)` — with a reminder at the bottom to run `wtshunt prune`
+when that happens. `wtshunt status --json` prints the same data as
 machine-readable JSON instead — each server entry also gets a
-`staleWiring` array with the same information (omitted when there's
-none) — e.g.:
+`staleWiring` array and a `worktreeGone: true` field with the same
+information (both omitted when they don't apply) — e.g.:
 
 ```sh
 wtshunt status --json | jq '.repos[] | {name, active}'
@@ -245,6 +247,10 @@ without leaving the screen:
   it otherwise.
 - `q` / `Ctrl-C` — quit.
 
+A server whose worktree no longer exists still gets a row (marked
+`(worktree gone)`), so `x` can stop it right there instead of needing
+`wtshunt prune` separately.
+
 The screen refreshes automatically every couple of seconds and right
 after every action. `serve`/`proxy` are opened in a separate pane, tab,
 or window — never in the same process as the UI itself — using whichever
@@ -264,6 +270,20 @@ and exits non-zero if the current directory isn't inside any registered
 repo — pair with `2>/dev/null` in a prompt to fail silently there.
 
 Tip: `wtshunt whoami 2>/dev/null` is safe to drop straight into `PS1`.
+
+### `wtshunt prune [repo]`
+
+Cleans up state left behind by worktrees that no longer exist (removed
+with `git worktree remove`, or manually deleted) — reconciling
+`state.json` against what `git worktree list` actually reports, for
+every configured repo, or just the one named. For each worktree gone
+that way: a running server is stopped (the same `SIGTERM`-then-poll
+procedure as `wtshunt stop`) before its entry is removed, its sticky
+port assignment is removed, the repo's `active` pointer is cleared if
+it pointed there, and any task with that worktree as a member has just
+that member removed (the whole task if that empties it). `--dry-run`
+(`-n`) prints what would change without touching anything; with
+nothing to clean up, it prints a single `Nothing to prune.` line.
 
 ### `wtshunt help [command]`
 
@@ -313,12 +333,14 @@ newly added repos or worktrees complete right away without reinstalling
 anything:
 
 - With nothing typed yet, it suggests command names (`use`, `serve`,
-  `run`, `status`, `stop`, `proxy`, `task`, `ui`, `whoami`, `help`,
-  `completion`).
+  `run`, `status`, `stop`, `proxy`, `task`, `ui`, `whoami`, `prune`,
+  `help`, `completion`).
 - As the first argument to `use`, `serve`, `stop`, `proxy`, or `run`, it
   suggests every repo name and every `repo/worktree` name, so
   `run <Tab>` lists them all and `run api/<Tab>` narrows to worktrees of
-  `api`. As the argument to `help`, it suggests command names instead.
+  `api`. As the first argument to `prune`, it suggests repo names only
+  (no `repo/worktree` combos, since pruning targets a whole repo). As
+  the argument to `help`, it suggests command names instead.
 - After `task`, it suggests `add`/`use`/`list`/`rm`; after `task use` or
   `task rm`, it suggests defined task names. After `task add <name>`, it
   falls through to the same repo/worktree suggestions as `run` and the
@@ -462,8 +484,11 @@ collects the data behind both `status` and `status --json`; `src/mux.ts`
 implements the multiplexer adapters `wtshunt ui` opens `serve`/`proxy`
 through; `src/ui/` holds `wtshunt ui`'s row-model, key-dispatch, and
 rendering logic (`src/commands/ui.ts` is its thin terminal/event-loop
-wrapper). Runtime state lives in `$XDG_STATE_HOME/wtshunt/state.json`
-(default `~/.local/state/wtshunt/state.json`).
+wrapper). `src/prune.ts` detects state entries left behind by worktrees
+that no longer exist — shared by `wtshunt prune` and `status`/`ui`'s
+"(worktree gone)" marker. Runtime state lives in
+`$XDG_STATE_HOME/wtshunt/state.json` (default
+`~/.local/state/wtshunt/state.json`).
 
 ## License
 

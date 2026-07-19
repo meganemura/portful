@@ -17,7 +17,8 @@ function formatRow(row: UiRow): string {
     const activeMark = row.active ? '*' : ' ';
     const portText = row.port !== undefined ? String(row.port) : '-';
     const pidText = row.pid !== undefined ? String(row.pid) : '-';
-    return `  ${activeMark} ${row.worktree}\t${row.branch}\tport ${portText}\tpid ${pidText}`;
+    const goneNote = row.worktreeGone ? ' (worktree gone)' : '';
+    return `  ${activeMark} ${row.worktree}\t${row.branch}\tport ${portText}\tpid ${pidText}${goneNote}`;
   }
 
   const marker = row.matches ? '*' : ' ';

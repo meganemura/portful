@@ -16,6 +16,8 @@ export interface WorktreeRow {
   port?: number;
   pid?: number;
   active: boolean;
+  /** True for a server entry whose worktree no longer exists — synthesized (see buildRows), not from `repo.worktrees`. */
+  worktreeGone?: true;
 }
 
 export interface TaskRow {
@@ -55,6 +57,27 @@ export function buildRows(overview: Overview): UiRow[] {
         ...(repo.ports[wt.name] !== undefined ? { port: repo.ports[wt.name] } : {}),
         ...(server ? { pid: server.pid } : {}),
         active: repo.active === wt.name,
+      });
+    }
+
+    // A server entry whose worktree no longer exists has no row from the
+    // loop above (repo.worktrees only lists what git currently reports) —
+    // synthesize one so it's still visible and actionable (e.g. `x` to
+    // stop it), same as `wtshunt prune` would clean up.
+    const knownWorktreeNames = new Set(repo.worktrees.map((wt) => wt.name));
+    for (const [wtName, server] of Object.entries(repo.servers)) {
+      if (knownWorktreeNames.has(wtName)) {
+        continue;
+      }
+      rows.push({
+        kind: 'worktree',
+        repo: repo.name,
+        worktree: wtName,
+        branch: server.branch,
+        ...(repo.ports[wtName] !== undefined ? { port: repo.ports[wtName] } : {}),
+        pid: server.pid,
+        active: repo.active === wtName,
+        worktreeGone: true,
       });
     }
   }

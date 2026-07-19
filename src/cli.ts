@@ -12,6 +12,7 @@ import { proxyCommand } from './commands/proxy.ts';
 import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from './commands/task.ts';
 import { uiCommand } from './commands/ui.ts';
 import { whoamiCommand } from './commands/whoami.ts';
+import { pruneCommand } from './commands/prune.ts';
 import { formatVersionString, readCommitHash, readPackageVersion, resolveRepoRootFromBin } from './version.ts';
 
 /**
@@ -43,6 +44,16 @@ async function repoAndWorktreeNames(): Promise<string[]> {
   );
 
   return perRepo.flat();
+}
+
+/** Registered repo names only (no `repo/worktree` combos) — `prune`'s first argument is a bare repo. */
+async function repoNamesOnly(): Promise<string[]> {
+  try {
+    const config = await loadConfig();
+    return Object.keys(config.repos);
+  } catch {
+    return [];
+  }
 }
 
 /** Task names currently defined in state, or [] if state can't be read. */
@@ -202,7 +213,20 @@ const repoPositional = (y: Argv) =>
     describe: 'repo, or repo/worktree to target directly',
   });
 
-const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'whoami', 'help', 'completion'];
+const COMMAND_NAMES = [
+  'use',
+  'serve',
+  'run',
+  'status',
+  'stop',
+  'proxy',
+  'task',
+  'ui',
+  'whoami',
+  'prune',
+  'help',
+  'completion',
+];
 
 /** Commands whose first argument is a `repo` or `repo/worktree` name. */
 const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'proxy', 'run']);
@@ -371,6 +395,22 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       })
     )
     .command(
+      'prune [repo]',
+      'Clean up state entries for worktrees that no longer exist',
+      (y) =>
+        y
+          .positional('repo', { type: 'string', describe: 'repo to prune (all repos if omitted)' })
+          .option('dry-run', {
+            alias: 'n',
+            type: 'boolean',
+            default: false,
+            describe: 'Show what would be pruned without changing anything',
+          }),
+      handle(async (argv) => {
+        await pruneCommand({ repo: argv.repo as string | undefined, dryRun: argv.dryRun as boolean });
+      })
+    )
+    .command(
       'help [command]',
       'Show help, optionally for a specific command',
       (y) => y.positional('command', { type: 'string', describe: 'command to show help for' }),
@@ -437,6 +477,12 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
 
       if (positionals.length === 1 && REPO_ARG_COMMANDS.has(command)) {
         const names = await repoAndWorktreeNames();
+        return names.filter(startsWithCurrent);
+      }
+
+      // Bare repo names only — pruning targets a whole repo, not a single worktree.
+      if (positionals.length === 1 && command === 'prune') {
+        const names = await repoNamesOnly();
         return names.filter(startsWithCurrent);
       }
 

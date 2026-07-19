@@ -36,6 +36,14 @@ test('renderLines: shows the help line when no message is set, else the message'
   assert.match(withoutMessage[withoutMessage.length - 1], /quit/);
 });
 
+test('renderLines: a worktree row with worktreeGone shows a "(worktree gone)" note', () => {
+  const rows: UiRow[] = [
+    { kind: 'worktree', repo: 'api', worktree: 'api-gone', branch: 'gone', port: 3105, pid: 222, active: false, worktreeGone: true },
+  ];
+  const lines = renderLines(rows, 0, '');
+  assert.match(lines[0], /\(worktree gone\)/);
+});
+
 test('renderLines: an empty row list still renders a placeholder and the message line', () => {
   const lines = renderLines([], 0, '');
   assert.equal(lines.length, 3); // placeholder + blank separator + message/help line
