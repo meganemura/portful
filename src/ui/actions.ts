@@ -4,7 +4,7 @@ import type { Overview } from '../overview.ts';
 import type { SetActiveResult } from '../commands/use.ts';
 import type { TaskUseResult } from '../commands/task.ts';
 import type { StopResult } from '../commands/stop.ts';
-import { proxyPid, repoPath, serverPid, worktreePath, type UiRow } from './model.ts';
+import { buildRows, proxyPid, repoPath, serverPid, worktreePath, type UiRow } from './model.ts';
 
 export type Action =
   | { type: 'quit' }
@@ -123,10 +123,29 @@ function killPid(deps: ActionDeps, pid: number): void {
   }
 }
 
+/**
+ * Index, in `buildRows(overview)`, of the row matching `predicate` — or
+ * `undefined` if none does (e.g. it vanished from the overview between the
+ * keypress and this call). Passed through to `Mux.open` as `order` so an
+ * adapter that can control pane placement (herdr) can line panes up with
+ * the list's top-to-bottom order regardless of what order rows are actually
+ * opened in; adapters that can't just ignore it.
+ */
+function rowOrder(overview: Overview, predicate: (row: UiRow) => boolean): number | undefined {
+  const index = buildRows(overview).findIndex(predicate);
+  return index === -1 ? undefined : index;
+}
+
 async function openServe(overview: Overview, deps: ActionDeps, repo: string, worktree: string): Promise<string> {
   const cwd = worktreePath(overview, repo, worktree);
   const command = wtshuntCommand('serve', `${repo}/${worktree}`);
-  const options = { title: `${repo}/${worktree}`, command, ...(cwd ? { cwd } : {}) };
+  const order = rowOrder(overview, (row) => row.kind === 'worktree' && row.repo === repo && row.worktree === worktree);
+  const options = {
+    title: `${repo}/${worktree}`,
+    command,
+    ...(cwd ? { cwd } : {}),
+    ...(order !== undefined ? { order } : {}),
+  };
   await deps.mux.open(options);
   if (deps.mux.name === 'fallback') {
     return fallbackMessage(options);
@@ -231,7 +250,13 @@ export async function executeAction(action: Action, overview: Overview, deps: Ac
       }
       const cwd = repoPath(overview, action.repo);
       const command = wtshuntCommand('proxy', action.repo);
-      const options = { title: `${action.repo}/proxy`, command, ...(cwd ? { cwd } : {}) };
+      const order = rowOrder(overview, (row) => row.kind === 'repo' && row.repo === action.repo);
+      const options = {
+        title: `${action.repo}/proxy`,
+        command,
+        ...(cwd ? { cwd } : {}),
+        ...(order !== undefined ? { order } : {}),
+      };
       await deps.mux.open(options);
       if (deps.mux.name === 'fallback') {
         return fallbackMessage(options);

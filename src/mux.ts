@@ -12,6 +12,14 @@ export interface MuxOpenOptions {
   /** Full shell command to run inside it. */
   command: string;
   cwd?: string;
+  /**
+   * This row's index in `wtshunt ui`'s flat row list (`buildRows`), so an
+   * adapter that can control pane placement (currently only herdr) can lay
+   * panes out to match the list's top-to-bottom order regardless of which
+   * order rows are actually opened in. Adapters that can't control
+   * placement (template/cmux/tmux/fallback) ignore it.
+   */
+  order?: number;
 }
 
 /**
@@ -111,70 +119,36 @@ export interface HerdrMuxOptions {
   herdrBin?: string;
 }
 
-/**
- * Deep-searches `agent start`'s JSON stdout for the newly created pane's
- * `pane_id` — its exact location in the response shape isn't documented,
- * only confirmed present somewhere (by analogy with `herdr pane current`'s
- * `result.pane.pane_id`, seen via read-only inspection) — so this walks
- * every object/array looking for the first `pane_id` string field rather
- * than assuming a fixed path. Returns `undefined` if `stdout` isn't JSON or
- * no `pane_id` turns up anywhere.
- */
-function findPaneId(value: unknown): string | undefined {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findPaneId(item);
-      if (found !== undefined) {
-        return found;
-      }
-    }
-    return undefined;
-  }
-  if (value !== null && typeof value === 'object') {
-    const obj = value as Record<string, unknown>;
-    if (typeof obj.pane_id === 'string') {
-      return obj.pane_id;
-    }
-    for (const key of Object.keys(obj)) {
-      const found = findPaneId(obj[key]);
-      if (found !== undefined) {
-        return found;
-      }
-    }
-  }
-  return undefined;
+/** One entry of `herdr pane list`'s `.result.panes[]`, as much of it as this module cares about. */
+interface HerdrPane {
+  pane_id: string;
 }
 
-/** Extracts a created pane's id from `agent start`'s stdout, or `undefined` if it can't be parsed as JSON / has no `pane_id` anywhere. */
-function extractPaneId(stdout: string): string | undefined {
-  try {
-    return findPaneId(JSON.parse(stdout));
-  } catch {
-    return undefined;
-  }
+function isHerdrPane(value: unknown): value is HerdrPane {
+  return value !== null && typeof value === 'object' && typeof (value as { pane_id?: unknown }).pane_id === 'string';
 }
 
 /**
- * True if `paneId` still refers to a live pane, checked via `herdr pane get
- * <id>` — confirmed (via read-only inspection) to exit non-zero when the
- * pane doesn't exist; also treated as gone if it somehow exits 0 with a
- * top-level `error` field in its JSON response, matching the
- * `{"error":{"code":"pane_not_found",...}}` shape seen from herdr when a
- * bogus pane id is used elsewhere. Used so a `lastPaneId` left over from a
- * pane the user has since closed doesn't get used as a split base.
+ * Runs `herdr pane list` and returns `.result.panes[]`, or `undefined` if
+ * the command fails, its stdout isn't JSON, or the shape doesn't match what
+ * read-only inspection confirmed (`{"result":{"panes":[{"pane_id":...},
+ * ...]}}`). `undefined` is the "give up on placement control" signal used
+ * throughout `herdrMux` below — never thrown, since a `pane list` hiccup
+ * shouldn't stop `agent start` from still doing its job.
  */
-async function herdrPaneAlive(herdrBin: string, paneId: string): Promise<boolean> {
+async function herdrPaneList(herdrBin: string): Promise<HerdrPane[] | undefined> {
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'get', paneId]));
+    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'list']));
   } catch {
-    return false;
+    return undefined;
   }
   try {
-    const parsed = JSON.parse(stdout) as { error?: unknown };
-    return !parsed.error;
+    const parsed = JSON.parse(stdout) as { result?: { panes?: unknown } };
+    const panes = parsed.result?.panes;
+    return Array.isArray(panes) ? panes.filter(isHerdrPane) : undefined;
   } catch {
-    return true;
+    return undefined;
   }
 }
 
@@ -183,56 +157,121 @@ async function herdrPaneAlive(herdrBin: string, paneId: string): Promise<boolean
  * `herdr agent start <name> --cwd <cwd> -- sh -c <command>`: the only herdr
  * subcommand found (via read-only `herdr --help`/`herdr agent --help`/
  * `herdr api schema --json` inspection) that creates a fresh labeled
- * pane *and* runs a command in it in a single call — `tab create` doesn't
- * return a pane id to run a follow-up `pane run` against, and `pane
- * run`/`pane split` both require an existing/reference pane id rather than
- * creating one outright.
+ * pane *and* runs a command in it in a single call.
  *
- * Each new pane is split off of whichever pane the *previous* `open()` call
- * created (tracked below as `lastPaneId`), not off of `wtshunt ui`'s own
- * pane every time — so opening rows top-to-bottom in `wtshunt ui` lands
- * panes left-to-right in the order they were opened, instead of always
- * wedging the newest one in immediately right of the ui pane. herdr's CLI
- * resolves "the pane to split from" as "the current pane", which it in turn
- * resolves from the `HERDR_PANE_ID` environment variable of the process
- * invoking it (confirmed via read-only inspection: passing a bogus id
- * through that env var yields `{"error":{"code":"pane_not_found",...}}`) —
- * so chaining onto a prior pane means overriding `HERDR_PANE_ID` in the
- * child's env rather than just letting it inherit this process's own.
+ * An earlier version tried to control *where* that pane landed by
+ * overriding the child process's `HERDR_PANE_ID` (the env var herdr's CLI
+ * reads to resolve "the current pane" as a split base) plus `--split
+ * right`. That doesn't work in practice: `agent start` ignores the
+ * overridden env and always splits off the ui pane itself, so the newest
+ * pane keeps wedging in immediately right of ui and opening rows
+ * top-to-bottom produces right-to-left panes. That whole approach — the env
+ * override, `--split` on `agent start`, and the pane-liveness check that
+ * supported it — has been removed.
+ *
+ * Instead, `agent start` is run exactly as it would be with no placement
+ * control at all (no `--split`, no env override — wherever herdr puts the
+ * new pane is fine), and the pane is moved into place *afterward* via
+ * `herdr pane move <pane_id> --tab <tab_id> --split right --target-pane
+ * <anchor>`, which takes an explicit target pane id rather than relying on
+ * any ambient "current pane" resolution. The new pane's id isn't in
+ * `agent start`'s own response in a documented/stable spot, so it's found
+ * by diffing `herdr pane list` before and after the call instead.
+ *
+ * The anchor is chosen from `order` (this row's index in `wtshunt ui`'s
+ * list, see `MuxOpenOptions`) against `openedPanes`, a map of every order
+ * this adapter has placed so far to the pane it landed in: the closest
+ * lower order's pane if one exists, else `wtshunt ui`'s own pane
+ * (`HERDR_PANE_ID`) as the left edge. A row with no `order` (e.g. a
+ * `toggle-proxy` open with no matching list row) is appended after the
+ * highest order seen so far, or also anchored to the ui pane if nothing has
+ * been placed yet. This keeps panes left-to-right in list order no matter
+ * what order the rows are actually opened in.
  */
 export function herdrMux(options: HerdrMuxOptions = {}): Mux {
   const herdrBin = options.herdrBin ?? 'herdr';
-  let lastPaneId: string | undefined;
+  const openedPanes = new Map<number, string>(); // order -> pane_id
 
   return {
     name: 'herdr',
     detect: () => Boolean(process.env.HERDR_ENV || process.env.HERDR_SOCKET_PATH),
-    async open({ title, command, cwd }) {
-      // Prefer the previously-opened pane as the split base, but only if it
-      // still exists; otherwise fall back to wtshunt ui's own pane. If
-      // neither is available (e.g. `wtshunt ui` itself wasn't started with
-      // `HERDR_PANE_ID` set), no base pane is specified at all — the exact
-      // pre-existing behavior, with no `--split` flag and no env override.
-      const basePaneId =
-        lastPaneId !== undefined && (await herdrPaneAlive(herdrBin, lastPaneId)) ? lastPaneId : process.env.HERDR_PANE_ID;
+    async open({ title, command, cwd, order }) {
+      const before = await herdrPaneList(herdrBin);
 
       const args = ['agent', 'start', sanitizeLabel(title)];
       if (cwd) {
         args.push('--cwd', cwd);
       }
       args.push(...envForwardArgs('--env'));
-      if (basePaneId !== undefined) {
-        args.push('--split', 'right');
-      }
       args.push('--', 'sh', '-c', command);
+      await execFileAsync(herdrBin, args);
 
-      const execOptions = basePaneId !== undefined ? { env: { ...process.env, HERDR_PANE_ID: basePaneId } } : {};
-      const { stdout } = await execFileAsync(herdrBin, args, execOptions);
+      if (before === undefined) {
+        // Couldn't even establish a baseline pane set — give up on
+        // placement control entirely; agent start above already ran.
+        return;
+      }
+      const after = await herdrPaneList(herdrBin);
+      if (after === undefined) {
+        return;
+      }
 
-      // Reset to undefined on anything unparsable so a bad/foreign response
-      // never gets chained onto by the next open() — that call instead
-      // falls back to wtshunt ui's own pane, same as the very first open().
-      lastPaneId = extractPaneId(stdout);
+      // Drop anything wtshunt placed previously that's no longer among the
+      // live panes (the user closed it, etc.) so it never gets picked as an
+      // anchor again.
+      const currentIds = new Set(after.map((p) => p.pane_id));
+      for (const [ord, paneId] of openedPanes) {
+        if (!currentIds.has(paneId)) {
+          openedPanes.delete(ord);
+        }
+      }
+
+      const beforeIds = new Set(before.map((p) => p.pane_id));
+      const newPanes = after.filter((p) => !beforeIds.has(p.pane_id));
+      if (newPanes.length !== 1) {
+        // Can't tell which pane agent start just created (none, or more
+        // than one — e.g. another process opened one concurrently) — don't
+        // guess. The pane stays wherever herdr placed it, untracked.
+        return;
+      }
+      const newPaneId = newPanes[0].pane_id;
+
+      let basePaneId: string | undefined;
+      let bestOrder = -Infinity;
+      for (const [ord, paneId] of openedPanes) {
+        const qualifies = order !== undefined ? ord < order : true;
+        if (qualifies && ord > bestOrder) {
+          bestOrder = ord;
+          basePaneId = paneId;
+        }
+      }
+      if (basePaneId === undefined) {
+        basePaneId = process.env.HERDR_PANE_ID;
+      }
+
+      const tabId = process.env.HERDR_TAB_ID;
+      if (basePaneId !== undefined && tabId !== undefined) {
+        try {
+          await execFileAsync(herdrBin, [
+            'pane',
+            'move',
+            newPaneId,
+            '--tab',
+            tabId,
+            '--split',
+            'right',
+            '--target-pane',
+            basePaneId,
+            '--no-focus',
+          ]);
+        } catch {
+          // Pane just stays wherever herdr originally placed it.
+        }
+      }
+
+      if (order !== undefined) {
+        openedPanes.set(order, newPaneId);
+      }
     },
   };
 }
