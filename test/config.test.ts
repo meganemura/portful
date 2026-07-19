@@ -300,3 +300,112 @@ test('config: malformed port_range throws a validation error', async () => {
     await rm(configDirRoot, { recursive: true, force: true });
   }
 });
+
+async function withTwoRepoConfig<T>(
+  repoLines: { api: string[]; front: string[] },
+  fn: () => Promise<T>
+): Promise<T> {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-collision-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      ['[repos.api]', ...repoLines.api, '', '[repos.front]', ...repoLines.front, ''].join('\n')
+    );
+    return await withEnv({ XDG_CONFIG_HOME: configDirRoot }, fn);
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+}
+
+test('config: no port collisions passes validation normally', async () => {
+  await withTwoRepoConfig(
+    {
+      api: ['path = "/tmp/api"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"'],
+      front: ['path = "/tmp/front"', 'fixed_port = 8080', 'port_range = [8101, 8199]', 'serve = "echo {port}"'],
+    },
+    async () => {
+      const config = await loadConfig();
+      assert.equal(config.repos.api.fixedPort, 3000);
+      assert.equal(config.repos.front.fixedPort, 8080);
+    }
+  );
+});
+
+test('config: overlapping port_range between two repos throws a validation error naming both', async () => {
+  await withTwoRepoConfig(
+    {
+      api: ['path = "/tmp/api"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"'],
+      front: ['path = "/tmp/front"', 'fixed_port = 8080', 'port_range = [3150, 3250]', 'serve = "echo {port}"'],
+    },
+    async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /repos\.api\.port_range/);
+          assert.match(err.message, /repos\.front\.port_range/);
+          assert.match(err.message, /overlap/);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+test('config: colliding fixed_port between two repos throws a validation error naming both', async () => {
+  await withTwoRepoConfig(
+    {
+      api: ['path = "/tmp/api"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"'],
+      front: ['path = "/tmp/front"', 'fixed_port = 3000', 'port_range = [8101, 8199]', 'serve = "echo {port}"'],
+    },
+    async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /repos\.api\.fixed_port/);
+          assert.match(err.message, /repos\.front\.fixed_port/);
+          assert.match(err.message, /both use port 3000/);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+test("config: a repo's fixed_port falling inside another repo's port_range throws a validation error naming both", async () => {
+  await withTwoRepoConfig(
+    {
+      api: ['path = "/tmp/api"', 'fixed_port = 8150', 'port_range = [3101, 3199]', 'serve = "echo {port}"'],
+      front: ['path = "/tmp/front"', 'fixed_port = 8080', 'port_range = [8101, 8199]', 'serve = "echo {port}"'],
+    },
+    async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /repos\.api\.fixed_port \(8150\)/);
+          assert.match(err.message, /repos\.front\.port_range/);
+          return true;
+        }
+      );
+    }
+  );
+});
+
+test("config: a repo's fixed_port falling inside its own port_range throws a validation error", async () => {
+  await withTwoRepoConfig(
+    {
+      api: ['path = "/tmp/api"', 'fixed_port = 3150', 'port_range = [3101, 3199]', 'serve = "echo {port}"'],
+      front: ['path = "/tmp/front"', 'fixed_port = 8080', 'port_range = [8101, 8199]', 'serve = "echo {port}"'],
+    },
+    async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /repos\.api\.fixed_port \(3150\)/);
+          assert.match(err.message, /its own port_range/);
+          return true;
+        }
+      );
+    }
+  );
+});

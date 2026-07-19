@@ -112,6 +112,8 @@ function validateConfig(parsed: unknown, configPath: string): Config {
     throw new Error(`No repos defined in ${configPath}.\n\nExample:\n\n${SAMPLE_CONFIG}`);
   }
 
+  validatePortCollisions(repos, configPath);
+
   const uiRaw = (parsed as Record<string, unknown>).ui;
   const ui = uiRaw !== undefined ? validateUiConfig(uiRaw, configPath) : undefined;
 
@@ -149,6 +151,61 @@ function validatePickerConfig(value: unknown, configPath: string): PickerConfig 
   }
 
   return v.command !== undefined ? { command: v.command as string } : {};
+}
+
+/**
+ * Static cross-repo port checks, run once every repo's own fields have
+ * already validated individually: no two repos may share a `fixed_port`,
+ * no two `port_range`s may overlap, and no repo's `fixed_port` may fall
+ * inside any repo's `port_range` (including its own) — each of those
+ * would let `wtshunt serve`'s port allocator or the fixed-port proxy
+ * silently collide with another repo's traffic.
+ */
+function validatePortCollisions(repos: Record<string, RepoConfig>, configPath: string): void {
+  const names = Object.keys(repos);
+
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const a = names[i];
+      const b = names[j];
+      const ra = repos[a];
+      const rb = repos[b];
+
+      if (ra.fixedPort === rb.fixedPort) {
+        throw new Error(
+          `repos.${a}.fixed_port and repos.${b}.fixed_port both use port ${ra.fixedPort} in ${configPath}. ` +
+            `Each repo needs its own fixed_port.`
+        );
+      }
+
+      if (ra.portRange[0] <= rb.portRange[1] && rb.portRange[0] <= ra.portRange[1]) {
+        throw new Error(
+          `repos.${a}.port_range (${ra.portRange[0]}-${ra.portRange[1]}) and repos.${b}.port_range ` +
+            `(${rb.portRange[0]}-${rb.portRange[1]}) overlap in ${configPath}. Each repo needs its own range.`
+        );
+      }
+    }
+  }
+
+  for (const a of names) {
+    const ra = repos[a];
+    for (const b of names) {
+      const rb = repos[b];
+      if (ra.fixedPort < rb.portRange[0] || ra.fixedPort > rb.portRange[1]) {
+        continue;
+      }
+      if (a === b) {
+        throw new Error(
+          `repos.${a}.fixed_port (${ra.fixedPort}) falls inside its own port_range ` +
+            `(${rb.portRange[0]}-${rb.portRange[1]}) in ${configPath}. Pick a fixed_port outside that range.`
+        );
+      }
+      throw new Error(
+        `repos.${a}.fixed_port (${ra.fixedPort}) falls inside repos.${b}.port_range ` +
+          `(${rb.portRange[0]}-${rb.portRange[1]}) in ${configPath}. Pick a fixed_port outside every port_range.`
+      );
+    }
+  }
 }
 
 function validateRepoConfig(name: string, value: unknown, configPath: string): RepoConfig {

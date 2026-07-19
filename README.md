@@ -119,6 +119,11 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
   port occupied at assignment time, in which case the next free port in
   `port_range` is used. The occupancy check has limits — see
   Limitations.
+- Ports are checked for collisions across repos when the config loads:
+  two repos can't share a `fixed_port`, their `port_range`s can't
+  overlap, and no repo's `fixed_port` may fall inside any repo's
+  `port_range` (including its own). Each of these fails config loading
+  immediately, naming the repos involved.
 
 The picker `use` and `task add` open for worktree selection can be
 swapped via a `[picker]` table:
