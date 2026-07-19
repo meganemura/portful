@@ -27,7 +27,11 @@ function printHumanReadable(overview: Overview): void {
       console.log('  servers:');
       for (const name of serverNames) {
         const entry = repo.servers[name];
-        console.log(`    ${name}\t${entry.branch}\tport ${entry.port}\tpid ${entry.pid}`);
+        const staleNote =
+          entry.staleWiring && entry.staleWiring.length > 0
+            ? ` (stale wiring: ${entry.staleWiring.map((s) => s.repo).join(', ')})`
+            : '';
+        console.log(`    ${name}\t${entry.branch}\tport ${entry.port}\tpid ${entry.pid}${staleNote}`);
       }
     }
 

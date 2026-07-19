@@ -82,6 +82,12 @@ test('buildOverview: lists worktrees, active, ports, servers (with resolvedRefs)
         resolvedRefs: { front: 8101 },
       };
       rs.proxy = { pid: process.pid, port: 3000 };
+      // front's active worktree currently resolves to the same port that
+      // was recorded at serve time, so this resolvedRefs entry is NOT
+      // stale — staleWiring should be omitted below.
+      const front = ensureRepoState(state, 'front');
+      front.active = 'front-main';
+      front.ports['front-main'] = 8101;
       state.tasks.prod = { members: { api: 'api-main' } };
     });
 
@@ -107,6 +113,34 @@ test('buildOverview: lists worktrees, active, ports, servers (with resolvedRefs)
     assert.equal(overview.tasks.length, 1);
     assert.equal(overview.tasks[0].name, 'prod');
     assert.equal(overview.tasks[0].matchesCurrentActive, true);
+  });
+});
+
+test('buildOverview: staleWiring appears on a server entry whose resolvedRefs no longer match, and is omitted otherwise', async () => {
+  await withFixtureEnv(async () => {
+    await withState((state) => {
+      const rs = ensureRepoState(state, 'api');
+      rs.active = 'api-main';
+      rs.ports['api-main'] = 3101;
+      // Recorded at serve time as front=8101, but front's active worktree
+      // has since moved to a different port — stale.
+      rs.servers['api-main'] = {
+        path: '/tmp',
+        branch: 'main',
+        port: 3101,
+        pid: process.pid,
+        resolvedRefs: { front: 8101 },
+      };
+      const front = ensureRepoState(state, 'front');
+      front.active = 'front-main';
+      front.ports['front-main'] = 8102;
+    });
+
+    const overview = await buildOverview();
+    const api = overview.repos.find((r) => r.name === 'api');
+    assert.deepEqual(api!.servers['api-main'].staleWiring, [
+      { repo: 'front', recordedPort: 8101, currentPort: 8102 },
+    ]);
   });
 });
 

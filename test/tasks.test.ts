@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { currentActivePort, detectWiringMismatches, taskMatchesCurrentActive } from '../src/tasks.ts';
+import { computeStaleWiring, currentActivePort, detectWiringMismatches, taskMatchesCurrentActive } from '../src/tasks.ts';
 import { ensureRepoState, type State } from '../src/state.ts';
 
 function makeState(): State {
@@ -75,6 +75,22 @@ test('detectWiringMismatches: ignores repos with no active worktree or no runnin
   const state = makeState();
   ensureRepoState(state, 'front'); // no active set
   assert.deepEqual(detectWiringMismatches(state, ['front']), []);
+});
+
+test('computeStaleWiring: works for any server, not just a repo\'s active one, and returns [] for no/matching refs', () => {
+  const state = makeState();
+  const api = ensureRepoState(state, 'api');
+  api.active = 'feature-x';
+  api.ports['feature-x'] = 3105;
+
+  // A non-active server entry ("main", while active is "feature-x") still
+  // gets checked — computeStaleWiring doesn't care which worktree it is.
+  assert.deepEqual(computeStaleWiring(state, { api: 3105 }), []);
+  assert.deepEqual(computeStaleWiring(state, { api: 3101 }), [
+    { repo: 'api', recordedPort: 3101, currentPort: 3105 },
+  ]);
+  assert.deepEqual(computeStaleWiring(state, undefined), []);
+  assert.deepEqual(computeStaleWiring(state, {}), []);
 });
 
 test('taskMatchesCurrentActive: true only when every member matches the current active worktree', () => {

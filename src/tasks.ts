@@ -21,6 +21,39 @@ export function currentActivePort(state: State, repoName: string): number | unde
   return rs?.ports[active];
 }
 
+export interface StaleWiringEntry {
+  /** The referenced repo (what `{repo.port}` pointed to). */
+  repo: string;
+  recordedPort: number;
+  /** What that repo's active worktree is *currently* wired to, if anything. */
+  currentPort: number | undefined;
+}
+
+/**
+ * Per-server-entry version of the wiring-staleness check: given one
+ * server's recorded `resolvedRefs` (any server, not just a repo's active
+ * one), reports every reference whose recorded port no longer matches
+ * what the referenced repo's active worktree currently resolves to.
+ * `detectWiringMismatches` and `status --json`'s per-server `staleWiring`
+ * both build on this.
+ */
+export function computeStaleWiring(
+  state: State,
+  resolvedRefs: Record<string, number> | undefined
+): StaleWiringEntry[] {
+  if (!resolvedRefs) {
+    return [];
+  }
+  const stale: StaleWiringEntry[] = [];
+  for (const [refRepo, recordedPort] of Object.entries(resolvedRefs)) {
+    const currentPort = currentActivePort(state, refRepo);
+    if (currentPort !== recordedPort) {
+      stale.push({ repo: refRepo, recordedPort, currentPort });
+    }
+  }
+  return stale;
+}
+
 /**
  * Finds running servers among `repoNames` whose recorded `{ref.port}`
  * resolutions no longer match what their referenced repo's active worktree
@@ -38,14 +71,8 @@ export function detectWiringMismatches(state: State, repoNames: string[]): Wirin
       continue;
     }
     const entry = rs?.servers[active];
-    if (!entry?.resolvedRefs) {
-      continue;
-    }
-    for (const [refRepo, recordedPort] of Object.entries(entry.resolvedRefs)) {
-      const currentPort = currentActivePort(state, refRepo);
-      if (currentPort !== recordedPort) {
-        mismatches.push({ repo, worktree: active, refRepo, recordedPort, currentPort });
-      }
+    for (const stale of computeStaleWiring(state, entry?.resolvedRefs)) {
+      mismatches.push({ repo, worktree: active, refRepo: stale.repo, recordedPort: stale.recordedPort, currentPort: stale.currentPort });
     }
   }
 

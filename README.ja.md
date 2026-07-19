@@ -151,7 +151,9 @@ worktree のディレクトリの中で任意のコマンドを実行します�
 ### `wtshunt status`
 
 設定済みの各リポジトリについて、アクティブな worktree、稼働中の全サーバ(worktree、ブランチ、ポート、pid)、プロキシの稼働状況と現在の転送先を表示します。
-`wtshunt status --json` は同じ内容を機械可読な JSON として出力します:
+`{<repo>.port}` の結線が古くなっているサーバには `(stale wiring: api)` のように印が付きます(下の「タスク (experimental)」参照)。
+`wtshunt status --json` は同じ内容を機械可読な JSON として出力します。
+各サーバのエントリには同じ情報を持つ `staleWiring` 配列も付きます(無ければ省略されます):
 
 ```sh
 wtshunt status --json | jq '.repos[] | {name, active}'

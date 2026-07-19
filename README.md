@@ -186,8 +186,12 @@ choosing on purpose.
 
 Shows, for every configured repo: the active worktree, every running
 server (worktree, branch, port, pid), and whether the proxy is running
-and what it's currently routing to. `wtshunt status --json` prints the
-same data as machine-readable JSON instead, e.g.:
+and what it's currently routing to. A server whose `{<repo>.port}`
+wiring has gone stale (see Tasks below) is marked inline, e.g.
+`(stale wiring: api)`. `wtshunt status --json` prints the same data as
+machine-readable JSON instead — each server entry also gets a
+`staleWiring` array with the same information (omitted when there's
+none) — e.g.:
 
 ```sh
 wtshunt status --json | jq '.repos[] | {name, active}'
