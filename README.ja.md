@@ -34,8 +34,8 @@ direnv やシェルの alias のようなディレクトリ単位のツールが
 - Node.js 20 以上(開発は Node 25 で実施)
 - macOS または Linux(POSIX の `sh` とプロセスグループに依存し、ポート競合の診断に `lsof` を使います)
 - `git`(worktree の列挙に `git worktree list` を使用)
-- [peco](https://github.com/peco/peco) は任意。
-  無ければ worktree の選択は番号入力のプロンプトにフォールバックします
+- ピッカー([peco](https://github.com/peco/peco) / [fzf](https://github.com/junegunn/fzf))は任意。
+  どちらかが `PATH` にあれば worktree の選択に自動で使われ、どちらも無ければ番号入力のプロンプトにフォールバックします
 
 ## インストール
 
@@ -103,6 +103,16 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
   割り当て時にポートの占有を検知した場合のみ、`port_range` 内の次の空きポートが使われます。
   この占有チェックには限界もあります(「制約とトラブルシューティング」参照)。
 
+`use` や `task add` の worktree 選択に使うピッカーは、`[picker]` テーブルで差し替えられます:
+
+```toml
+[picker]
+command = "fzf --height 40% --reverse"
+```
+
+候補行を標準入力で受け取り、選択した行を標準出力に返すコマンドなら何でも使えます。
+未指定の場合は peco、fzf の順に自動検出し、どちらも無ければ番号入力のプロンプトになります。
+
 設定ファイルが無い場合、`wtshunt` は上と同じ2リポジトリ構成の例を表示して終了します。
 
 ## コマンド
@@ -116,7 +126,7 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 リポジトリの「アクティブ」な worktree を選びます。
 `repo/worktree` 形式なら直接セットします。
 `repo` だけ(または cwd から推測)ならピッカーが開きます。
-ピッカーは `PATH` に [peco](https://github.com/peco/peco) があれば peco、無ければ番号選択のプロンプトです。
+ピッカーは `[picker]` で設定したコマンド、無ければ自動検出した peco か fzf、どれも無ければ番号選択のプロンプトです(「設定」参照)。
 プロキシが稼働中なら、切り替えた瞬間から新しいアクティブ worktree にルーティングされます。
 再起動は不要です。
 その worktree のサーバがまだ起動していなければ、`use` は警告を出して `wtshunt serve` の実行を促します。
@@ -288,7 +298,7 @@ wtshunt task use feature-x
 ```
 
 - `wtshunt task add <name> [repo/worktree ...]` はタスクを作成します。
-  明示的に指定したリポジトリはその worktree を使い、指定しなかった登録済みリポジトリはそれぞれについて選択を促されます(peco、無ければ番号選択。先頭に「このリポジトリをタスクに含めない」選択肢があります)。
+  明示的に指定したリポジトリはその worktree を使い、指定しなかった登録済みリポジトリはそれぞれについてピッカーで選択を促されます(先頭に「このリポジトリをタスクに含めない」選択肢があります)。
 - `wtshunt task use <name>` はまず全メンバーの worktree がまだ存在するか検証し、ひとつでも欠けていれば何も適用せずエラーにします。
   検証後、全メンバーを一括で切り替え、どのメンバーがまだ `wtshunt serve` されていないかを報告し、起動中のサーバの `{<repo>.port}` の結線が古くなっていないかも警告します(下記参照)。
 - `wtshunt task list` はタスクとそのメンバーを一覧し、全メンバーが現在のアクティブ worktree と一致するタスクには `*` を付けます。

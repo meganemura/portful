@@ -41,8 +41,10 @@ exists for.
 - macOS or Linux — wtshunt relies on POSIX `sh` and process groups, and
   uses `lsof` to diagnose port conflicts
 - `git` (worktrees are enumerated with `git worktree list`)
-- [peco](https://github.com/peco/peco) is optional; the worktree picker
-  falls back to a numbered prompt without it
+- A picker ([peco](https://github.com/peco/peco) or
+  [fzf](https://github.com/junegunn/fzf)) is optional; whichever is on
+  your `PATH` is used for worktree selection, with a numbered prompt as
+  the fallback
 
 ## Install
 
@@ -118,6 +120,18 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
   `port_range` is used. The occupancy check has limits — see
   Limitations.
 
+The picker `use` and `task add` open for worktree selection can be
+swapped via a `[picker]` table:
+
+```toml
+[picker]
+command = "fzf --height 40% --reverse"
+```
+
+Any command that reads candidate lines from stdin and prints the
+selected line to stdout works. When unset, peco and then fzf are
+auto-detected, falling back to the numbered prompt.
+
 If the config file is missing, `wtshunt` prints the two-repo example
 above and exits.
 
@@ -133,8 +147,9 @@ all of its worktrees, symlinks included).
 
 Pick which worktree of a repo is "active." With `repo/worktree`, sets it
 directly. With just `repo` (or nothing, inferred from cwd), opens a
-picker: [peco](https://github.com/peco/peco) if it's on your `PATH`,
-otherwise a plain numbered prompt. If the proxy is already running, it
+picker: the `[picker]` command from config if set, otherwise
+auto-detected peco or fzf, otherwise a plain numbered prompt (see
+Configuration). If the proxy is already running, it
 immediately starts routing to the newly active worktree — no restart
 needed. If no server is running yet for that worktree, `use` warns you
 and tells you to run `wtshunt serve`.
@@ -357,8 +372,8 @@ wtshunt task use feature-x
 
 - `wtshunt task add <name> [repo/worktree ...]` creates a task. Repos
   named explicitly use the given worktree; every other registered repo
-  gets prompted for (peco, or a numbered picker, with a leading option
-  to leave that repo out of the task entirely).
+  gets prompted for via the picker, with a leading option to leave that
+  repo out of the task entirely.
 - `wtshunt task use <name>` validates every member's worktree still
   exists — if even one doesn't, nothing is applied and an error is
   reported — then switches all of them at once. Reports which members
