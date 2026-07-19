@@ -61,6 +61,46 @@ export function keyToAction(row: UiRow | undefined, key: string): Action {
   return { type: 'none' };
 }
 
+/** A key `keyToAction` recognizes as bound to *some* action, on the right row kind. */
+type ActionKey = 'u' | 'return' | 's' | 'x' | 'r' | 'p';
+
+function isActionKey(key: string): key is ActionKey {
+  return key === 'u' || key === 'return' || key === 's' || key === 'x' || key === 'r' || key === 'p';
+}
+
+/** Row kinds each action key applies to — kept in lockstep with the `if` conditions in `keyToAction` above. */
+const VALID_ROW_KINDS: Record<ActionKey, UiRow['kind'][]> = {
+  u: ['worktree', 'task'],
+  return: ['worktree', 'task'],
+  s: ['worktree'],
+  x: ['worktree'],
+  r: ['worktree'],
+  p: ['repo', 'worktree'],
+};
+
+const ROW_KIND_LABEL: Record<UiRow['kind'], string> = {
+  repo: 'repo row',
+  worktree: 'worktree row',
+  task: 'task row',
+};
+
+const KEY_LABEL: Partial<Record<ActionKey, string>> = { return: 'Enter' };
+
+/**
+ * When `keyToAction` resolves to `none` because a *known* action key
+ * doesn't apply to the selected row's kind (e.g. `s` on a task row, `x` on
+ * a repo row), returns a short one-line explanation for the message line.
+ * Returns `''` for keys with no binding at all (e.g. `g`) or no selected
+ * row — those stay silently ignored, same as before this existed.
+ */
+export function invalidKeyHint(row: UiRow | undefined, key: string): string {
+  if (!row || !isActionKey(key) || VALID_ROW_KINDS[key].includes(row.kind)) {
+    return '';
+  }
+  const keyLabel = KEY_LABEL[key] ?? key;
+  return `Key "${keyLabel}" does nothing on a ${ROW_KIND_LABEL[row.kind]}.`;
+}
+
 /** Everything `executeAction` needs beyond the current `Overview` snapshot, injected so it's testable without touching real state/processes. */
 export interface ActionDeps {
   setActiveWorktree(repo: string, worktree: string): Promise<SetActiveResult>;
@@ -89,6 +129,34 @@ async function openServe(overview: Overview, deps: ActionDeps, repo: string, wor
     return fallbackMessage(options);
   }
   return `Opened serve for "${repo}/${worktree}" via ${deps.mux.name}.`;
+}
+
+/**
+ * Returns the one-line "in progress" message to show in the message line
+ * the instant a key is pressed, before its (possibly slow — `stop` and
+ * `restart` poll for up to a couple seconds) action has resolved. Tone
+ * matches `executeAction`'s completion messages below so the message line
+ * reads as one continuous narration rather than a silent gap followed by
+ * a jump cut. `none`/`quit` have nothing pending, so they return `''`.
+ */
+export function pendingMessage(action: Action): string {
+  switch (action.type) {
+    case 'none':
+    case 'quit':
+      return '';
+    case 'use-worktree':
+      return `Setting active worktree for "${action.repo}" to "${action.worktree}"…`;
+    case 'use-task':
+      return `Applying task "${action.task}"…`;
+    case 'serve':
+      return `Opening serve for "${action.repo}/${action.worktree}"…`;
+    case 'stop':
+      return `Stopping "${action.repo}/${action.worktree}"…`;
+    case 'restart':
+      return `Restarting "${action.repo}/${action.worktree}"…`;
+    case 'toggle-proxy':
+      return `Toggling proxy for "${action.repo}"…`;
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderLines } from '../src/ui/render.ts';
+import { renderLines, BOLD, RED, RESET, type UiMessage } from '../src/ui/render.ts';
 import type { UiRow } from '../src/ui/model.ts';
 
 const ROWS: UiRow[] = [
@@ -10,8 +10,10 @@ const ROWS: UiRow[] = [
   { kind: 'task', task: 'prod', members: { api: 'api-main' }, matches: true },
 ];
 
+const NO_MESSAGE: UiMessage = { text: '', isError: false };
+
 test('renderLines: marks the selected row with a cursor and shows repo/worktree/task details', () => {
-  const lines = renderLines(ROWS, 1, '');
+  const lines = renderLines(ROWS, 1, NO_MESSAGE);
 
   assert.equal(lines.length, ROWS.length + 2); // + blank separator + message/help line
   assert.ok(lines[0].startsWith('  '), 'unselected row has no cursor');
@@ -28,24 +30,35 @@ test('renderLines: marks the selected row with a cursor and shows repo/worktree/
   assert.match(lines[3], /\*/);
 });
 
-test('renderLines: shows the help line when no message is set, else the message', () => {
-  const withMessage = renderLines(ROWS, 0, 'Stopped server for "api/api-main" (pid 111).');
-  assert.equal(withMessage[withMessage.length - 1], 'Stopped server for "api/api-main" (pid 111).');
+test('renderLines: shows the plain help line when no message is set', () => {
+  const lines = renderLines(ROWS, 0, NO_MESSAGE);
+  assert.match(lines[lines.length - 1], /quit/);
+  assert.doesNotMatch(lines[lines.length - 1], /\x1b\[/);
+});
 
-  const withoutMessage = renderLines(ROWS, 0, '');
-  assert.match(withoutMessage[withoutMessage.length - 1], /quit/);
+test('renderLines: a non-error message is bold but not red', () => {
+  const lines = renderLines(ROWS, 0, { text: 'Stopped server for "api/api-main" (pid 111).', isError: false });
+  const last = lines[lines.length - 1];
+  assert.equal(last, `${BOLD}Stopped server for "api/api-main" (pid 111).${RESET}`);
+  assert.doesNotMatch(last, /\x1b\[31m/);
+});
+
+test('renderLines: an error message is bold and red', () => {
+  const lines = renderLines(ROWS, 0, { text: 'Something went wrong.', isError: true });
+  const last = lines[lines.length - 1];
+  assert.equal(last, `${BOLD}${RED}Something went wrong.${RESET}`);
 });
 
 test('renderLines: a worktree row with worktreeGone shows a "(worktree gone)" note', () => {
   const rows: UiRow[] = [
     { kind: 'worktree', repo: 'api', worktree: 'api-gone', branch: 'gone', port: 3105, pid: 222, active: false, worktreeGone: true },
   ];
-  const lines = renderLines(rows, 0, '');
+  const lines = renderLines(rows, 0, NO_MESSAGE);
   assert.match(lines[0], /\(worktree gone\)/);
 });
 
 test('renderLines: an empty row list still renders a placeholder and the message line', () => {
-  const lines = renderLines([], 0, '');
+  const lines = renderLines([], 0, NO_MESSAGE);
   assert.equal(lines.length, 3); // placeholder + blank separator + message/help line
   assert.match(lines[0], /no repos configured/);
   assert.match(lines[2], /quit/);

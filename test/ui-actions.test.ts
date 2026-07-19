@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { executeAction, keyToAction, type ActionDeps } from '../src/ui/actions.ts';
+import { executeAction, invalidKeyHint, keyToAction, pendingMessage, type ActionDeps } from '../src/ui/actions.ts';
 import type { UiRow } from '../src/ui/model.ts';
 import type { Overview } from '../src/overview.ts';
 import type { Mux } from '../src/mux.ts';
@@ -46,6 +46,22 @@ test('keyToAction: an unmapped key with no row is a no-op', () => {
   assert.deepEqual(keyToAction(WORKTREE_ROW, 'z'), { type: 'none' });
 });
 
+test('invalidKeyHint: names the key and row kind when a known action key does not apply to the selected row', () => {
+  assert.equal(invalidKeyHint(TASK_ROW, 's'), 'Key "s" does nothing on a task row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'x'), 'Key "x" does nothing on a repo row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'r'), 'Key "r" does nothing on a repo row.');
+  assert.equal(invalidKeyHint(TASK_ROW, 'p'), 'Key "p" does nothing on a task row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'u'), 'Key "u" does nothing on a repo row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'return'), 'Key "Enter" does nothing on a repo row.');
+});
+
+test('invalidKeyHint: is empty for a key that is unbound entirely, a valid combination, or no selected row', () => {
+  assert.equal(invalidKeyHint(TASK_ROW, 'g'), '');
+  assert.equal(invalidKeyHint(WORKTREE_ROW, 'z'), '');
+  assert.equal(invalidKeyHint(WORKTREE_ROW, 's'), '');
+  assert.equal(invalidKeyHint(undefined, 's'), '');
+});
+
 function fakeMux(name: string, openCalls: { title: string; command: string; cwd?: string }[]): Mux {
   return {
     name,
@@ -73,6 +89,29 @@ function makeOverview(): Overview {
     tasks: [],
   };
 }
+
+test('pendingMessage: one line per action, in the tone of the matching executeAction completion message', () => {
+  assert.equal(
+    pendingMessage({ type: 'use-worktree', repo: 'api', worktree: 'api-feature-x' }),
+    'Setting active worktree for "api" to "api-feature-x"…'
+  );
+  assert.equal(pendingMessage({ type: 'use-task', task: 'prod' }), 'Applying task "prod"…');
+  assert.equal(
+    pendingMessage({ type: 'serve', repo: 'api', worktree: 'api-feature-x' }),
+    'Opening serve for "api/api-feature-x"…'
+  );
+  assert.equal(
+    pendingMessage({ type: 'stop', repo: 'api', worktree: 'api-feature-x' }),
+    'Stopping "api/api-feature-x"…'
+  );
+  assert.equal(
+    pendingMessage({ type: 'restart', repo: 'api', worktree: 'api-feature-x' }),
+    'Restarting "api/api-feature-x"…'
+  );
+  assert.equal(pendingMessage({ type: 'toggle-proxy', repo: 'api' }), 'Toggling proxy for "api"…');
+  assert.equal(pendingMessage({ type: 'none' }), '');
+  assert.equal(pendingMessage({ type: 'quit' }), '');
+});
 
 test('executeAction: use-worktree calls setActiveWorktree and reports whether a server is running', async () => {
   const calls: [string, string][] = [];

@@ -3,8 +3,16 @@ import { loadConfig } from '../config.ts';
 import { resolveMux } from '../mux.ts';
 import { buildOverview, type Overview } from '../overview.ts';
 import { buildRows, moveSelection, type UiRow } from '../ui/model.ts';
-import { keyToAction, executeAction, type ActionDeps } from '../ui/actions.ts';
-import { renderLines, CLEAR_AND_HOME, ENTER_ALT_SCREEN, LEAVE_ALT_SCREEN, HIDE_CURSOR, SHOW_CURSOR } from '../ui/render.ts';
+import { keyToAction, executeAction, pendingMessage, invalidKeyHint, type ActionDeps } from '../ui/actions.ts';
+import {
+  renderLines,
+  CLEAR_AND_HOME,
+  ENTER_ALT_SCREEN,
+  LEAVE_ALT_SCREEN,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
+  type UiMessage,
+} from '../ui/render.ts';
 import { setActiveWorktree } from './use.ts';
 import { applyTask } from './task.ts';
 import { stopServer } from './stop.ts';
@@ -42,7 +50,7 @@ export async function uiCommand(): Promise<void> {
   let overview: Overview = await buildOverview(config);
   let rows: UiRow[] = buildRows(overview);
   let selected = 0;
-  let message = '';
+  let message: UiMessage = { text: '', isError: false };
 
   let restored = false;
   const restore = () => {
@@ -69,7 +77,7 @@ export async function uiCommand(): Promise<void> {
         selected = Math.max(0, rows.length - 1);
       }
     } catch (err) {
-      message = err instanceof Error ? err.message : String(err);
+      message = { text: err instanceof Error ? err.message : String(err), isError: true };
     }
     draw();
   };
@@ -130,14 +138,27 @@ export async function uiCommand(): Promise<void> {
         return;
       }
       if (action.type === 'none') {
+        // Known action key, wrong row kind (e.g. `s` on a task row): say so.
+        // A key with no binding at all stays silently ignored, as before.
+        const hint = invalidKeyHint(rows[selected], logicalKey);
+        if (hint) {
+          message = { text: hint, isError: false };
+          draw();
+        }
         return;
       }
 
+      // Show the "in progress" message right away — `stop`/`restart` poll
+      // for up to a couple seconds, and the screen shouldn't sit frozen
+      // with no acknowledgement for the entire wait.
+      message = { text: pendingMessage(action), isError: false };
+      draw();
+
       void (async () => {
         try {
-          message = await executeAction(action, overview, deps);
+          message = { text: await executeAction(action, overview, deps), isError: false };
         } catch (err) {
-          message = err instanceof Error ? err.message : String(err);
+          message = { text: err instanceof Error ? err.message : String(err), isError: true };
         }
         if (!done) {
           await refresh();
