@@ -64,12 +64,26 @@ function unknownRepoError(config: { repos: Record<string, unknown> }, repo: stri
   return new Error(`Unknown repo "${repo}". Registered repos: ${names.length > 0 ? names.join(', ') : '(none)'}`);
 }
 
-async function setActiveAndReport(repoName: string, worktree: WorktreeInfo): Promise<void> {
-  const result = await withState((state) => {
+export interface SetActiveResult {
+  hasServer: boolean;
+  proxyActive: boolean;
+}
+
+/**
+ * The bare state mutation behind `use`, with no console output — reused
+ * as-is by `wtshunt ui`'s "use worktree" action, which reports the result
+ * in its own message line instead.
+ */
+export async function setActiveWorktree(repoName: string, worktreeName: string): Promise<SetActiveResult> {
+  return withState((state) => {
     const rs = ensureRepoState(state, repoName);
-    rs.active = worktree.name;
-    return { hasServer: Boolean(rs.servers[worktree.name]), proxyActive: Boolean(rs.proxy) };
+    rs.active = worktreeName;
+    return { hasServer: Boolean(rs.servers[worktreeName]), proxyActive: Boolean(rs.proxy) };
   });
+}
+
+async function setActiveAndReport(repoName: string, worktree: WorktreeInfo): Promise<void> {
+  const result = await setActiveWorktree(repoName, worktree.name);
 
   console.log(`Active worktree for "${repoName}" set to "${worktree.name}".`);
 

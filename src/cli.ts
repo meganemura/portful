@@ -10,6 +10,7 @@ import { statusCommand } from './commands/status.ts';
 import { stopCommand } from './commands/stop.ts';
 import { proxyCommand } from './commands/proxy.ts';
 import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from './commands/task.ts';
+import { uiCommand } from './commands/ui.ts';
 
 /**
  * Flat list of every repo name plus every `repo/worktree` name across all
@@ -199,7 +200,7 @@ const repoPositional = (y: Argv) =>
     describe: 'repo, or repo/worktree to target directly',
   });
 
-const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'help', 'completion'];
+const COMMAND_NAMES = ['use', 'serve', 'run', 'status', 'stop', 'proxy', 'task', 'ui', 'help', 'completion'];
 
 /** Commands whose first argument is a `repo` or `repo/worktree` name. */
 const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'proxy', 'run']);
@@ -330,6 +331,14 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
           )
           .demandCommand(1, 'Specify a task subcommand: add, use, list, or rm.'),
       () => {}
+    )
+    .command(
+      'ui',
+      'Interactive terminal UI for switching worktrees and driving serve/proxy',
+      () => {},
+      handle(async () => {
+        await uiCommand();
+      })
     )
     .command(
       'help [command]',

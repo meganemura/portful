@@ -1,6 +1,6 @@
 import { loadConfig } from '../config.ts';
 import { resolveRepo } from '../repo.ts';
-import { ensureRepoState, isAlive, withState } from '../state.ts';
+import { ensureRepoState, isAlive, readState, withState } from '../state.ts';
 
 export interface StopArgs {
   repo?: string;
@@ -32,32 +32,29 @@ export async function waitForExit(pid: number, intervalMs = POLL_INTERVAL_MS, ti
   }
 }
 
-export async function stopCommand(args: StopArgs): Promise<void> {
-  const config = await loadConfig();
-  const { repoName, worktreeName } = await resolveRepo(config, args.repo, process.cwd());
+export type StopResult =
+  | { status: 'no-server' }
+  | { status: 'stopped'; pid: number }
+  | { status: 'timeout'; pid: number };
 
+/**
+ * The bare stop-and-confirm logic behind `stop`, for a known repo/worktree
+ * pair with no console output or repo/cwd resolution — reused as-is by
+ * `wtshunt ui`'s "stop" and "restart" actions, which report the result in
+ * their own message line instead.
+ */
+export async function stopServer(repoName: string, worktreeName: string): Promise<StopResult> {
   const lookup = await withState((state) => {
     const rs = ensureRepoState(state, repoName);
-    const targetName = worktreeName ?? rs.active;
-    if (!targetName) {
-      return { status: 'no-target' as const };
-    }
-    const entry = rs.servers[targetName];
-    if (!entry) {
-      return { status: 'not-running' as const, worktree: targetName };
-    }
-    return { status: 'found' as const, worktree: targetName, entry };
+    const entry = rs.servers[worktreeName];
+    return entry ? { found: true as const, entry } : { found: false as const };
   });
 
-  if (lookup.status === 'no-target') {
-    throw new Error(`No active worktree for repo "${repoName}".`);
-  }
-  if (lookup.status === 'not-running') {
-    console.log(`No server running for "${lookup.worktree}".`);
-    return;
+  if (!lookup.found) {
+    return { status: 'no-server' };
   }
 
-  const { worktree: targetName, entry } = lookup;
+  const { entry } = lookup;
 
   try {
     process.kill(-entry.pid, 'SIGTERM');
@@ -74,12 +71,7 @@ export async function stopCommand(args: StopArgs): Promise<void> {
   const exited = await waitForExit(entry.pid);
 
   if (!exited) {
-    console.error(
-      `Sent SIGTERM but pid ${entry.pid} is still running (it may be shutting down slowly or trapping ` +
-        `SIGTERM). It remains visible in "wtshunt status"; check again shortly or kill it manually.`
-    );
-    process.exitCode = 1;
-    return;
+    return { status: 'timeout', pid: entry.pid };
   }
 
   await withState((state) => {
@@ -88,10 +80,39 @@ export async function stopCommand(args: StopArgs): Promise<void> {
     // removed this entry itself (or a new server may have since taken the
     // same worktree name), so only remove it if it's still the one we sent
     // SIGTERM to.
-    if (rs.servers[targetName]?.pid === entry.pid) {
-      delete rs.servers[targetName];
+    if (rs.servers[worktreeName]?.pid === entry.pid) {
+      delete rs.servers[worktreeName];
     }
   });
 
-  console.log(`Stopped server for "${targetName}" (pid ${entry.pid}).`);
+  return { status: 'stopped', pid: entry.pid };
+}
+
+export async function stopCommand(args: StopArgs): Promise<void> {
+  const config = await loadConfig();
+  const { repoName, worktreeName } = await resolveRepo(config, args.repo, process.cwd());
+
+  const state = await readState();
+  const targetName = worktreeName ?? state.repos[repoName]?.active;
+  if (!targetName) {
+    throw new Error(`No active worktree for repo "${repoName}".`);
+  }
+
+  const result = await stopServer(repoName, targetName);
+
+  if (result.status === 'no-server') {
+    console.log(`No server running for "${targetName}".`);
+    return;
+  }
+
+  if (result.status === 'timeout') {
+    console.error(
+      `Sent SIGTERM but pid ${result.pid} is still running (it may be shutting down slowly or trapping ` +
+        `SIGTERM). It remains visible in "wtshunt status"; check again shortly or kill it manually.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`Stopped server for "${targetName}" (pid ${result.pid}).`);
 }

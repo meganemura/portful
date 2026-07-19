@@ -2,7 +2,7 @@ import { loadConfig, type Config } from '../config.ts';
 import { pickOne } from '../picker.ts';
 import { findWorktree, listWorktrees, parseRepoArg } from '../repo.ts';
 import { ensureRepoState, readState, withState, type State } from '../state.ts';
-import { detectWiringMismatches, taskMatchesCurrentActive } from '../tasks.ts';
+import { detectWiringMismatches, taskMatchesCurrentActive, type WiringMismatch } from '../tasks.ts';
 
 const SKIP = '(skip)';
 
@@ -81,13 +81,25 @@ export interface TaskUseArgs {
   name: string;
 }
 
-export async function taskUseCommand(args: TaskUseArgs): Promise<void> {
+export interface TaskUseResult {
+  members: Record<string, string>;
+  needsServe: string[];
+  proxying: { repo: string; active: string }[];
+  mismatches: WiringMismatch[];
+}
+
+/**
+ * The bare validate-and-switch logic behind `task use`, with no console
+ * output — reused as-is by `wtshunt ui`'s "use task" action, which
+ * summarizes the result in its own message line instead.
+ */
+export async function applyTask(name: string): Promise<TaskUseResult> {
   const config = await loadConfig();
 
-  const result = await withState(async (state) => {
-    const task = state.tasks[args.name];
+  return withState(async (state) => {
+    const task = state.tasks[name];
     if (!task) {
-      throw unknownTaskError(state, args.name);
+      throw unknownTaskError(state, name);
     }
 
     // Validate every member up front so a stale one can't leave the switch
@@ -106,7 +118,7 @@ export async function taskUseCommand(args: TaskUseArgs): Promise<void> {
     }
     if (missing.length > 0) {
       throw new Error(
-        `Cannot apply task "${args.name}": some members no longer exist:\n` +
+        `Cannot apply task "${name}": some members no longer exist:\n` +
           missing.map((line) => `  - ${line}`).join('\n')
       );
     }
@@ -136,6 +148,10 @@ export async function taskUseCommand(args: TaskUseArgs): Promise<void> {
 
     return { members: task.members, needsServe, proxying, mismatches };
   });
+}
+
+export async function taskUseCommand(args: TaskUseArgs): Promise<void> {
+  const result = await applyTask(args.name);
 
   const memberList = Object.entries(result.members)
     .map(([repo, wt]) => `${repo}/${wt}`)
