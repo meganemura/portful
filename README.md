@@ -118,8 +118,8 @@ serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
   which interface it bound — see Limitations for what it still can't
   catch.
 
-If the config file is missing, `wtshunt` prints a single-repo example
-like the `api` table above and exits.
+If the config file is missing, `wtshunt` prints the two-repo example
+above and exits.
 
 ## Commands
 

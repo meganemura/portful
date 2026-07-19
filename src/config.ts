@@ -26,10 +26,16 @@ export interface Config {
 }
 
 const SAMPLE_CONFIG = `[repos.api]
-path = "~/work/api"
-fixed_port = 3000
-port_range = [3101, 3199]
+path = "~/work/api"            # path to the repo's main checkout
+fixed_port = 3000               # the port other services always talk to
+port_range = [3101, 3199]       # ports handed out to individual worktrees
 serve = "bundle exec rails s -p {port}"
+
+[repos.front]
+path = "~/work/front"
+fixed_port = 8080
+port_range = [8101, 8199]
+serve = "API_URL=http://127.0.0.1:{port:api} PORT={port} npm run dev"
 `;
 
 export function getConfigPath(): string {
