@@ -12,6 +12,7 @@ import { proxyCommand } from './commands/proxy.ts';
 import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from './commands/task.ts';
 import { uiCommand } from './commands/ui.ts';
 import { whoamiCommand } from './commands/whoami.ts';
+import { formatVersionString, readCommitHash, readPackageVersion, resolveRepoRootFromBin } from './version.ts';
 
 /**
  * Flat list of every repo name plus every `repo/worktree` name across all
@@ -217,9 +218,24 @@ const TASK_SUBCOMMANDS = ['add', 'use', 'list', 'rm'];
 // the same args this instance was built with, including when `help run`
 // builds a second instance with a synthesized `['run', '--help']`.
 function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
+  // Overrides yargs' own package.json auto-detection so `--version`
+  // includes wtshunt's own commit hash, e.g. "0.1.0 (abc1234)". The commit
+  // hash needs a synchronous `git rev-parse` — only actually run when
+  // --version/-v is present in rawArgs, so an ordinary `use`/`serve`/etc.
+  // invocation (built through this same function) never pays for it.
+  // package.json's version is a plain small-file read either way, cheap
+  // regardless.
+  const repoRoot = resolveRepoRootFromBin(process.argv[1]);
+  const wantsVersion = rawArgs.includes('--version') || rawArgs.includes('-v');
+  const versionString = formatVersionString(
+    readPackageVersion(repoRoot),
+    wantsVersion ? readCommitHash(repoRoot) : undefined
+  );
+
   return yargs(rawArgs)
     .scriptName('wtshunt')
     .locale('en')
+    .version(versionString)
     .command(
       'use [repo]',
       'Select the active worktree for a repo',
