@@ -221,23 +221,36 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
  * Stands in for the real `herdr` binary in the `herdrMux.open()` tests
  * below (which — unlike the `.detect()` test above — do exercise `.open()`,
  * but only ever against this stand-in, never the real `herdr`). Understands
- * just enough of `pane list`/`agent start`/`pane move` to drive
- * `herdrMux`'s placement logic, keeping the set of "live" panes in a small
- * JSON file (`$STUB_STATE`) so it can persist across the several separate
- * stub invocations one `open()` call makes:
+ * just enough of `agent start`/`pane list`/`pane neighbor`/`pane swap` to
+ * drive `herdrMux`'s placement logic:
  *
+ * - `agent start ...` appends a log line, then either echoes back
+ *   `$STUB_AGENT_START_STDOUT` verbatim (for simulating a malformed
+ *   response), or — if `$STUB_NEXT_PANE_ID` is set — responds with
+ *   `{"result":{"agent":{"pane_id":$STUB_NEXT_PANE_ID,...}}}` and records
+ *   that pane as newly created in the state file (`$STUB_STATE`, a JSON
+ *   array of `{pane_id}`, so a later `pane list` reports it), or otherwise
+ *   `{"result":{"agent":{}}}` (no `pane_id`). Exits with
+ *   `$STUB_AGENT_START_EXIT` (default 0).
  * - `pane list` appends a log line, then prints `{"result":{"panes":
  *   [...state...]}}`, or exits 1 (simulating a herdr CLI failure) if
  *   `$STUB_PANE_LIST_FAIL` is set.
- * - `agent start ...` appends a log line, then — if `$STUB_NEXT_PANE_ID` is
- *   set — appends `{pane_id: $STUB_NEXT_PANE_ID}` to the state file (as the
- *   pane it just created), simulating the new pane showing up in the next
- *   `pane list`. Exits with `$STUB_AGENT_START_EXIT` (default 0).
- * - `pane move <id> ...` just appends a log line and exits 0.
+ * - `pane neighbor --direction <dir> --pane <id>` appends a log line, then
+ *   pops the next entry off the `$STUB_NEIGHBOR_QUEUE` JSON-array file (a
+ *   test-supplied script of responses, one per call, regardless of
+ *   direction/pane — tests order the entries to match the calls their
+ *   scenario should make) and responds with that pane id as the neighbor,
+ *   or with no neighbor at all if the entry is `null` or the queue is
+ *   empty. Always exits 0, per what hands-on testing confirmed of the real
+ *   command.
+ * - `pane swap --source-pane <a> --target-pane <b>` appends a log line,
+ *   then pops the next boolean off `$STUB_SWAP_QUEUE` and exits 0 (success)
+ *   or 1 (failure) accordingly — an empty queue defaults to failure, so an
+ *   under-scripted test fails loudly instead of silently "succeeding".
  *
- * Tests drive scenarios by writing to the state file directly (e.g. to
- * simulate the user closing a pane between two `open()` calls) and by
- * changing `$STUB_NEXT_PANE_ID` before each `open()` call.
+ * Tests drive scenarios by writing `$STUB_NEIGHBOR_QUEUE`/`$STUB_SWAP_QUEUE`
+ * before each `open()` call and by rewriting the state file directly (e.g.
+ * to simulate the user closing a pane between two `open()` calls).
  */
 async function writeHerdrStub(dir: string): Promise<string> {
   const stubPath = join(dir, 'herdr-stub.cjs');
@@ -268,6 +281,25 @@ function writeState(panes) {
   }
 }
 
+function popQueue(envVar) {
+  const path = process.env[envVar];
+  if (!path) {
+    return { present: false, value: undefined };
+  }
+  let queue;
+  try {
+    queue = JSON.parse(fs.readFileSync(path, 'utf8'));
+  } catch {
+    queue = [];
+  }
+  if (!Array.isArray(queue) || queue.length === 0) {
+    return { present: false, value: undefined };
+  }
+  const [value, ...rest] = queue;
+  fs.writeFileSync(path, JSON.stringify(rest));
+  return { present: true, value };
+}
+
 if (argv[0] === 'pane' && argv[1] === 'list') {
   log();
   if (process.env.STUB_PANE_LIST_FAIL === '1') {
@@ -279,19 +311,48 @@ if (argv[0] === 'pane' && argv[1] === 'list') {
 
 if (argv[0] === 'agent' && argv[1] === 'start') {
   log();
+  if (process.env.STUB_AGENT_START_STDOUT !== undefined) {
+    process.stdout.write(process.env.STUB_AGENT_START_STDOUT);
+    process.exit(Number(process.env.STUB_AGENT_START_EXIT ?? '0'));
+  }
   const newPaneId = process.env.STUB_NEXT_PANE_ID;
   if (newPaneId) {
     const panes = readState();
-    panes.push({ pane_id: newPaneId, tab_id: 'w1:t1' });
+    panes.push({ pane_id: newPaneId });
     writeState(panes);
+    process.stdout.write(
+      JSON.stringify({
+        id: 'cli:agent:start',
+        result: { agent: { pane_id: newPaneId, tab_id: 'w1:t1', workspace_id: 'w1' }, type: 'agent_started' },
+      })
+    );
+  } else {
+    process.stdout.write(JSON.stringify({ id: 'cli:agent:start', result: { agent: {}, type: 'agent_started' } }));
   }
-  process.stdout.write(JSON.stringify({ id: 'cli:agent:start', result: { agent: {} } }));
   process.exit(Number(process.env.STUB_AGENT_START_EXIT ?? '0'));
 }
 
-if (argv[0] === 'pane' && argv[1] === 'move') {
+if (argv[0] === 'pane' && argv[1] === 'neighbor') {
   log();
-  process.stdout.write(JSON.stringify({ id: 'cli:pane:move', result: {} }));
+  const popped = popQueue('STUB_NEIGHBOR_QUEUE');
+  const neighborPaneId = popped.present ? popped.value : null;
+  process.stdout.write(
+    JSON.stringify({
+      id: 'cli:pane:neighbor',
+      result: { neighbor: neighborPaneId ? { neighbor_pane_id: neighborPaneId } : {} },
+    })
+  );
+  process.exit(0);
+}
+
+if (argv[0] === 'pane' && argv[1] === 'swap') {
+  log();
+  const popped = popQueue('STUB_SWAP_QUEUE');
+  const success = popped.present ? Boolean(popped.value) : false;
+  if (!success) {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify({ id: 'cli:pane:swap', result: { type: 'pane_swap' } }));
   process.exit(0);
 }
 
@@ -319,24 +380,30 @@ function callsMatching(calls: StubCall[], subcommand: string, verb: string): Stu
   return calls.filter((c) => c.argv[0] === subcommand && c.argv[1] === verb);
 }
 
-function targetPaneOf(call: StubCall): string | undefined {
-  const index = call.argv.indexOf('--target-pane');
+function flagValue(call: StubCall, flag: string): string | undefined {
+  const index = call.argv.indexOf(flag);
   return index === -1 ? undefined : call.argv[index + 1];
 }
 
-function tabOf(call: StubCall): string | undefined {
-  const index = call.argv.indexOf('--tab');
-  return index === -1 ? undefined : call.argv[index + 1];
-}
+const targetPaneOf = (call: StubCall): string | undefined => flagValue(call, '--target-pane');
+const sourcePaneOf = (call: StubCall): string | undefined => flagValue(call, '--source-pane');
+const tabOf = (call: StubCall): string | undefined => flagValue(call, '--tab');
+const workspaceOf = (call: StubCall): string | undefined => flagValue(call, '--workspace');
+const directionOf = (call: StubCall): string | undefined => flagValue(call, '--direction');
+const paneArgOf = (call: StubCall): string | undefined => flagValue(call, '--pane');
 
 const HERDR_OPEN_TEST_ENV_KEYS = [
   'HERDR_PANE_ID',
   'HERDR_TAB_ID',
+  'HERDR_WORKSPACE_ID',
   'STUB_LOG',
   'STUB_STATE',
   'STUB_NEXT_PANE_ID',
   'STUB_AGENT_START_EXIT',
+  'STUB_AGENT_START_STDOUT',
   'STUB_PANE_LIST_FAIL',
+  'STUB_NEIGHBOR_QUEUE',
+  'STUB_SWAP_QUEUE',
 ] as const;
 
 type HerdrOpenTestEnv = Partial<Record<(typeof HERDR_OPEN_TEST_ENV_KEYS)[number], string>>;
@@ -359,132 +426,157 @@ function restoreHerdrOpenTestEnv(saved: HerdrOpenTestEnv): void {
   }
 }
 
-/** Sets up a fresh stub binary, log file, and empty pane-list state file; returns everything a test needs to drive `herdrMux.open()`. */
-async function setUpHerdrOpenTest(dir: string): Promise<{ herdrBin: string; logFile: string; stateFile: string }> {
+/** Sets up a fresh stub binary, log file, empty pane-list state, and empty neighbor/swap response queues; returns everything a test needs to drive `herdrMux.open()`. */
+async function setUpHerdrOpenTest(
+  dir: string
+): Promise<{ herdrBin: string; logFile: string; stateFile: string; neighborQueueFile: string; swapQueueFile: string }> {
   const herdrBin = await writeHerdrStub(dir);
   const logFile = join(dir, 'log.jsonl');
   const stateFile = join(dir, 'state.json');
+  const neighborQueueFile = join(dir, 'neighbor-queue.json');
+  const swapQueueFile = join(dir, 'swap-queue.json');
   await writeFile(stateFile, '[]');
+  await writeFile(neighborQueueFile, '[]');
+  await writeFile(swapQueueFile, '[]');
   process.env.STUB_LOG = logFile;
   process.env.STUB_STATE = stateFile;
-  return { herdrBin, logFile, stateFile };
+  process.env.STUB_NEIGHBOR_QUEUE = neighborQueueFile;
+  process.env.STUB_SWAP_QUEUE = swapQueueFile;
+  return { herdrBin, logFile, stateFile, neighborQueueFile, swapQueueFile };
 }
 
-test('herdrMux.open: (a) a first open with an order calls pane list, agent start, pane list, then pane move onto wtshunt ui\'s own pane', async () => {
+/** Scripts the stub's next `pane neighbor` (or `pane swap`) responses, in call order. */
+async function writeQueue(path: string, entries: readonly unknown[]): Promise<void> {
+  await writeFile(path, JSON.stringify(entries));
+}
+
+test('herdrMux.open: (a) agent start\'s args include --workspace/--tab from env, --split right, --no-focus, and the `-- sh -c <cmd>` form', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
-    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    const { herdrBin, logFile, neighborQueueFile } = await setUpHerdrOpenTest(dir);
     process.env.HERDR_PANE_ID = 'w1:p1'; // wtshunt ui's own pane
     process.env.HERDR_TAB_ID = 'w1:t1'; // wtshunt ui's own tab
+    process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await writeQueue(neighborQueueFile, ['w1:p1']); // already left of nothing but the anchor — no swaps needed
 
     const mux = herdrMux({ herdrBin });
     await mux.open({ title: 'api/feature-x', command: 'echo hi', cwd: '/tmp', order: 0 });
 
     const calls = await readStubLog(logFile);
-    assert.deepEqual(
-      calls.map((c) => `${c.argv[0]} ${c.argv[1]}`),
-      ['pane list', 'agent start', 'pane list', 'pane move']
-    );
-
-    const move = calls[3];
-    assert.equal(move.argv[2], 'w1:p2', 'moves the pane agent start just created');
-    assert.equal(targetPaneOf(move), 'w1:p1', 'targets wtshunt ui\'s own pane, the only anchor available yet');
-    assert.equal(tabOf(move), 'w1:t1');
-    assert.ok(move.argv.includes('--no-focus'));
+    const starts = callsMatching(calls, 'agent', 'start');
+    assert.equal(starts.length, 1);
+    const start = starts[0];
+    assert.equal(workspaceOf(start), 'w1');
+    assert.equal(tabOf(start), 'w1:t1');
+    const splitIndex = start.argv.indexOf('--split');
+    assert.equal(start.argv[splitIndex + 1], 'right');
+    assert.ok(start.argv.includes('--no-focus'));
+    assert.deepEqual(start.argv.slice(-4), ['--', 'sh', '-c', 'echo hi'], 'command runs as `-- sh -c <cmd>`');
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('herdrMux.open: (b) a second open with a larger order anchors on the pane the smaller-order open created', async () => {
+test('herdrMux.open: (b) a first open whose new pane\'s left neighbor is already wtshunt ui\'s own pane needs no swaps', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
-    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    const { herdrBin, logFile, neighborQueueFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PANE_ID = 'w1:p1';
+    process.env.HERDR_TAB_ID = 'w1:t1';
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await writeQueue(neighborQueueFile, ['w1:p1']);
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
+    const neighbors = callsMatching(calls, 'pane', 'neighbor');
+    assert.equal(neighbors.length, 1);
+    assert.equal(directionOf(neighbors[0]), 'left');
+    assert.equal(paneArgOf(neighbors[0]), 'w1:p2');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: (c) a second open with a larger order swaps once past ui\'s pane onto the first open\'s pane, then stops', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, neighborQueueFile, swapQueueFile } = await setUpHerdrOpenTest(dir);
     process.env.HERDR_PANE_ID = 'w1:p1';
     process.env.HERDR_TAB_ID = 'w1:t1';
 
     const mux = herdrMux({ herdrBin });
+
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await writeQueue(neighborQueueFile, ['w1:p1']); // first open: already in place, right of ui
     await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    // `--split right` always lands the new pane right of ui, i.e. between
+    // ui (w1:p1) and the first open's pane (w1:p2): left(w1:p1) != base
+    // (w1:p2) -> right(w1:p2) -> swap -> now left(w1:p2) == base -> stop.
     process.env.STUB_NEXT_PANE_ID = 'w1:p3';
+    await writeQueue(neighborQueueFile, ['w1:p1', 'w1:p2', 'w1:p2']);
+    await writeQueue(swapQueueFile, [true]);
     await mux.open({ title: 'second', command: 'echo 2', order: 5 });
 
-    const moves = callsMatching(await readStubLog(logFile), 'pane', 'move');
-    assert.equal(moves.length, 2);
-    assert.equal(moves[0].argv[2], 'w1:p2');
-    assert.equal(targetPaneOf(moves[0]), 'w1:p1');
-    assert.equal(moves[1].argv[2], 'w1:p3');
-    assert.equal(targetPaneOf(moves[1]), 'w1:p2', 'order 5 anchors on order 0\'s pane, not the ui pane');
+    const calls = await readStubLog(logFile);
+    const swaps = callsMatching(calls, 'pane', 'swap');
+    assert.equal(swaps.length, 1);
+    assert.equal(sourcePaneOf(swaps[0]), 'w1:p3');
+    assert.equal(targetPaneOf(swaps[0]), 'w1:p2', 'order 5 anchors on order 0\'s pane, not the ui pane');
+
+    const neighbors = callsMatching(calls, 'pane', 'neighbor');
+    assert.equal(neighbors.length, 4, '1 from the first open + 3 (left, right, left) from the second');
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('herdrMux.open: (c) an open with a smaller order than any tracked pane still anchors on wtshunt ui\'s own pane, inserting to its left', async () => {
+test('herdrMux.open: (d) an open with a smaller order than any tracked pane anchors on wtshunt ui\'s own pane and needs no swaps', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
-    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    const { herdrBin, logFile, neighborQueueFile } = await setUpHerdrOpenTest(dir);
     process.env.HERDR_PANE_ID = 'w1:p1';
     process.env.HERDR_TAB_ID = 'w1:t1';
 
     const mux = herdrMux({ herdrBin });
+
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await writeQueue(neighborQueueFile, ['w1:p1']);
     await mux.open({ title: 'first', command: 'echo 1', order: 5 });
+
     process.env.STUB_NEXT_PANE_ID = 'w1:p3';
+    // No tracked order is smaller than 0, so it falls back to the ui pane —
+    // already in place, right of ui.
+    await writeQueue(neighborQueueFile, ['w1:p1']);
     await mux.open({ title: 'second', command: 'echo 2', order: 0 });
 
-    const moves = callsMatching(await readStubLog(logFile), 'pane', 'move');
-    assert.equal(moves.length, 2);
-    assert.equal(moves[1].argv[2], 'w1:p3');
-    assert.equal(targetPaneOf(moves[1]), 'w1:p1', 'no tracked order is smaller than 0, so it falls back to the ui pane');
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('herdrMux.open: (d) a tracked pane no longer reported by pane list is dropped and never used as an anchor again', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
-  const saved = saveHerdrOpenTestEnv();
-  try {
-    const { herdrBin, logFile, stateFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PANE_ID = 'w1:p1';
-    process.env.HERDR_TAB_ID = 'w1:t1';
-
-    const mux = herdrMux({ herdrBin });
-    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
-    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
-
-    // The user closes the pane the first open created — herdr's own pane
-    // list no longer reports it.
-    await writeFile(stateFile, '[]');
-
-    process.env.STUB_NEXT_PANE_ID = 'w1:p3';
-    await mux.open({ title: 'second', command: 'echo 2', order: 5 });
-
-    const moves = callsMatching(await readStubLog(logFile), 'pane', 'move');
-    assert.equal(moves.length, 2);
-    assert.equal(moves[1].argv[2], 'w1:p3');
-    assert.equal(targetPaneOf(moves[1]), 'w1:p1', 'the closed pane must not be used as an anchor');
-  } finally {
-    restoreHerdrOpenTestEnv(saved);
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test('herdrMux.open: (e) with neither $HERDR_PANE_ID nor $HERDR_TAB_ID set, pane move is never called and agent start keeps its original form', async () => {
+test('herdrMux.open: (e) with no HERDR_PANE_ID/HERDR_TAB_ID/HERDR_WORKSPACE_ID, agent start omits --workspace/--tab and neighbor/swap are never called', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
     delete process.env.HERDR_PANE_ID; // wtshunt ui wasn't itself started from a herdr pane
     delete process.env.HERDR_TAB_ID;
+    delete process.env.HERDR_WORKSPACE_ID;
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
 
     const mux = herdrMux({ herdrBin });
@@ -493,60 +585,146 @@ test('herdrMux.open: (e) with neither $HERDR_PANE_ID nor $HERDR_TAB_ID set, pane
     const calls = await readStubLog(logFile);
     const starts = callsMatching(calls, 'agent', 'start');
     assert.equal(starts.length, 1);
-    assert.equal(starts[0].argv.includes('--split'), false, 'agent start never takes --split in the new design');
-    assert.equal(callsMatching(calls, 'pane', 'move').length, 0);
+    assert.equal(starts[0].argv.includes('--workspace'), false);
+    assert.equal(starts[0].argv.includes('--tab'), false);
+    assert.equal(callsMatching(calls, 'pane', 'neighbor').length, 0);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('herdrMux.open: (f) when the pane-list diff is not exactly one new pane, move and tracking are both skipped', async () => {
+test('herdrMux.open: (f) an unparseable or pane_id-less agent start response skips placement entirely and is never tracked', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
-    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    const { herdrBin, logFile, neighborQueueFile } = await setUpHerdrOpenTest(dir);
     process.env.HERDR_PANE_ID = 'w1:p1';
     process.env.HERDR_TAB_ID = 'w1:t1';
-    delete process.env.STUB_NEXT_PANE_ID; // agent start creates nothing the stub can report back — a 0-pane diff
 
     const mux = herdrMux({ herdrBin });
-    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
 
-    assert.equal(callsMatching(await readStubLog(logFile), 'pane', 'move').length, 0);
+    // stdout isn't JSON at all.
+    process.env.STUB_AGENT_START_STDOUT = 'not json';
+    await mux.open({ title: 'bad-stdout', command: 'echo 1', order: 0 });
 
-    // A follow-up open must still anchor on wtshunt ui's own pane, proving
-    // the ambiguous first open was never tracked as order 0's pane.
+    // stdout is valid JSON, but result.agent.pane_id is missing.
+    delete process.env.STUB_AGENT_START_STDOUT;
+    delete process.env.STUB_NEXT_PANE_ID;
+    await mux.open({ title: 'no-pane-id', command: 'echo 2', order: 1 });
+
+    let calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'list').length, 0, 'neither failure reaches the pane list cleanup step');
+    assert.equal(callsMatching(calls, 'pane', 'neighbor').length, 0);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
+
+    // A later, successful open with a higher order must still fall back to
+    // wtshunt ui's own pane rather than anchoring on anything left behind
+    // by either failed attempt above — proof neither one was tracked. If it
+    // had been, the left-neighbor check below wouldn't immediately match
+    // and a second (right-neighbor) call would follow.
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
-    await mux.open({ title: 'second', command: 'echo 2', order: 5 });
+    await writeQueue(neighborQueueFile, ['w1:p1']);
+    await mux.open({ title: 'third', command: 'echo 3', order: 2 });
 
-    const moves = callsMatching(await readStubLog(logFile), 'pane', 'move');
-    assert.equal(moves.length, 1);
-    assert.equal(targetPaneOf(moves[0]), 'w1:p1');
+    calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
+    assert.equal(callsMatching(calls, 'pane', 'neighbor').length, 1);
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test('herdrMux.open: when `pane list` itself fails, placement control is abandoned but agent start still runs in its original form', async () => {
+test('herdrMux.open: (g) a tracked pane no longer reported by pane list is dropped and never used as an anchor again', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
-    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    const { herdrBin, logFile, stateFile, neighborQueueFile } = await setUpHerdrOpenTest(dir);
     process.env.HERDR_PANE_ID = 'w1:p1';
     process.env.HERDR_TAB_ID = 'w1:t1';
-    process.env.STUB_PANE_LIST_FAIL = '1';
+
+    const mux = herdrMux({ herdrBin });
+
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await writeQueue(neighborQueueFile, ['w1:p1']);
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    // The user closes the pane the first open created — herdr's own pane
+    // list no longer reports it.
+    await writeFile(stateFile, '[]');
+
+    // Order 5 would normally anchor on order 0's pane (w1:p2), but it's
+    // gone, so this falls back to the ui pane — already in place.
+    process.env.STUB_NEXT_PANE_ID = 'w1:p3';
+    await writeQueue(neighborQueueFile, ['w1:p1']);
+    await mux.open({ title: 'second', command: 'echo 2', order: 5 });
+
+    const calls = await readStubLog(logFile);
+    // 1 neighbor call from the first open + exactly 1 from the second — if
+    // the closed pane had wrongly stayed the anchor, the left-neighbor
+    // check ('w1:p1') wouldn't match it and a second (right-neighbor) call
+    // would follow.
+    assert.equal(callsMatching(calls, 'pane', 'neighbor').length, 2);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: (h) bubbling stops at the 16-swap cap when the left neighbor never becomes the anchor', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, neighborQueueFile, swapQueueFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PANE_ID = 'w1:p1'; // the anchor — scripted to never actually be reached
+    process.env.HERDR_TAB_ID = 'w1:t1';
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+
+    const neighborEntries: string[] = [];
+    for (let i = 0; i < 16; i++) {
+      neighborEntries.push('w1:pnever'); // left neighbor: never the anchor
+      neighborEntries.push('w1:pright'); // right neighbor: always present
+    }
+    await writeQueue(neighborQueueFile, neighborEntries);
+    await writeQueue(swapQueueFile, Array(16).fill(true));
 
     const mux = herdrMux({ herdrBin });
     await mux.open({ title: 'first', command: 'echo 1', order: 0 });
 
     const calls = await readStubLog(logFile);
-    const starts = callsMatching(calls, 'agent', 'start');
-    assert.equal(starts.length, 1);
-    assert.equal(starts[0].argv.includes('--split'), false);
-    assert.equal(callsMatching(calls, 'pane', 'move').length, 0);
+    const neighbors = callsMatching(calls, 'pane', 'neighbor');
+    assert.equal(neighbors.filter((c) => directionOf(c) === 'left').length, 16);
+    assert.equal(neighbors.filter((c) => directionOf(c) === 'right').length, 16);
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 16);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: when `pane list` fails, only its cleanup is skipped — agent start and swap-based placement still run', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, neighborQueueFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PANE_ID = 'w1:p1';
+    process.env.HERDR_TAB_ID = 'w1:t1';
+    process.env.STUB_PANE_LIST_FAIL = '1';
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+    await writeQueue(neighborQueueFile, ['w1:p1']);
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'agent', 'start').length, 1);
+    assert.equal(callsMatching(calls, 'pane', 'list').length, 1, 'still attempted, even though it fails');
+    const neighbors = callsMatching(calls, 'pane', 'neighbor');
+    assert.equal(neighbors.length, 1, 'placement still proceeds off HERDR_PANE_ID despite the failed cleanup call');
+    assert.equal(callsMatching(calls, 'pane', 'swap').length, 0);
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
