@@ -1,4 +1,4 @@
-# wtshunt
+# wtshunt(worktree shunt)
 
 [English](README.md)
 
@@ -10,7 +10,6 @@ worktree ごとにバックエンド(たとえば Rails アプリ)のサーバ�
 切り替えは次のリクエストから反映されます。
 クライアントの再起動も `.env` の書き換えも `cd` も要りません。
 
-名前は **worktree shunt** の略です。
 shunt(入換)とは、操車場で全体の流れを止めることなく車両を別の線路へ振り分ける操作のことです。
 wtshunt がトラフィックに対してやっているのは、まさにこれです。
 
@@ -53,7 +52,7 @@ npm link
 # 1. バックエンドのリポジトリを登録(初回のみ。下の「設定」参照)
 mkdir -p ~/.config/wtshunt && $EDITOR ~/.config/wtshunt/config.toml
 
-# 2. worktree ごとにサーバを立ち上げておく — ターミナルのタブを分けてフォアグラウンドで
+# 2. worktree ごとにサーバを立ち上げておく(ターミナルのタブを分けてフォアグラウンドで)
 wtshunt serve api/feature-x
 wtshunt serve api/feature-y      # 別のタブで
 
@@ -76,7 +75,7 @@ sequenceDiagram
     Note over X,Y: どちらも wtshunt serve で起動済み
     C->>P: GET /todos
     P->>X: 転送 (アクティブ: feature-x)
-    Note over C,Y: $ wtshunt use api/feature-y — アクティブを切り替え
+    Note over C,Y: $ wtshunt use api/feature-y(アクティブを切り替え)
     C->>P: GET /todos
     P->>Y: 転送 (転送先はリクエストごとに読み直し)
 ```

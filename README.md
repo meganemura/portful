@@ -1,4 +1,4 @@
-# wtshunt
+# wtshunt (worktree shunt)
 
 [日本語版](README.ja.md)
 
@@ -12,10 +12,9 @@ forwards to whichever worktree is currently "active." Switching takes
 effect on the very next request — no restarting the client, no editing
 `.env`, no `cd`.
 
-The name is short for **worktree shunt**. A shunt is the railway
-maneuver of redirecting rolling stock onto another track while the rest
-of the yard keeps moving — which is exactly what wtshunt does with your
-traffic.
+A shunt is the railway maneuver of redirecting rolling stock onto
+another track while the rest of the yard keeps moving — which is
+exactly what wtshunt does with your traffic.
 
 Directory-scoped tools like direnv or shell aliases only affect processes
 you start *afterwards* — they cannot re-point a client that is already
