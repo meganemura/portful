@@ -117,7 +117,7 @@ export function templateMux(template: string): Mux {
 }
 
 export interface HerdrMuxOptions {
-  /** Overrides the binary invoked for every herdr subcommand this adapter runs (`pane list`, `pane split`, `pane rename`, `pane run`, `pane layout`, `tab list`, `tab create`) — for tests only, so the real `herdr` is never exercised. */
+  /** Overrides the binary invoked for every herdr subcommand this adapter runs (`pane list`, `pane split`, `pane rename`, `pane run`, `pane layout`, `pane get`, `tab list`, `tab create`) — for tests only, so the real `herdr` is never exercised. */
   herdrBin?: string;
 }
 
@@ -161,10 +161,18 @@ function isHerdrTab(value: unknown): value is HerdrTab {
   return v.label === undefined || typeof v.label === 'string';
 }
 
-/** One entry of `herdr pane layout`'s `.result.layout.panes[]`, as much of it as this module cares about. */
+/**
+ * One entry of `herdr pane layout`'s `.result.layout.panes[]`, as much of it
+ * as this module cares about. `rect.y` (confirmed present alongside `rect.x`
+ * by hands-on testing) is what the dedicated "wtshunt" tab's layout logic
+ * uses to tell the ui pane's row (smallest `y`) apart from the row of
+ * serve/proxy panes below it (larger `y`) — `rect.x` alone (all this
+ * interface carried before) can't distinguish "left of the ui pane" from
+ * "below it".
+ */
 interface HerdrLayoutPane {
   pane_id: string;
-  rect: { x: number };
+  rect: { x: number; y: number };
 }
 
 function isHerdrLayoutPane(value: unknown): value is HerdrLayoutPane {
@@ -175,7 +183,8 @@ function isHerdrLayoutPane(value: unknown): value is HerdrLayoutPane {
   if (typeof v.pane_id !== 'string' || v.rect === null || typeof v.rect !== 'object') {
     return false;
   }
-  return typeof (v.rect as { x?: unknown }).x === 'number';
+  const rect = v.rect as { x?: unknown; y?: unknown };
+  return typeof rect.x === 'number' && typeof rect.y === 'number';
 }
 
 /**
@@ -234,11 +243,12 @@ async function herdrTabList(herdrBin: string, workspaceId: string): Promise<Herd
  * Runs `herdr pane layout --pane <paneId>` and returns
  * `.result.layout.panes[]` — confirmed by hands-on testing to be the full
  * layout of whichever tab `paneId` belongs to (every pane in that tab, not
- * just `paneId` itself), each entry carrying a `rect.x` that can be compared
- * to find the leftmost one. Returns `undefined` on failure, same "skip this
- * step" contract as `herdrPaneList`/`herdrTabList` — only used by the
- * plugin-mode flow's fallback anchor lookup (`findAnchorInPluginTab`), which
- * has its own further fallback for when this comes back `undefined`.
+ * just `paneId` itself), each entry carrying a `rect.x`/`rect.y` that can be
+ * compared to find the leftmost pane, or to split the tab into rows. Returns
+ * `undefined` on failure, same "skip this step" contract as
+ * `herdrPaneList`/`herdrTabList` — only used by the dedicated "wtshunt" tab's
+ * placement logic (`decideWtshuntTabPlacement`), which has its own further
+ * fallback for when this comes back `undefined`.
  */
 async function herdrPaneLayout(herdrBin: string, paneId: string): Promise<HerdrLayoutPane[] | undefined> {
   let stdout: string;
@@ -257,23 +267,90 @@ async function herdrPaneLayout(herdrBin: string, paneId: string): Promise<HerdrL
 }
 
 /**
- * Runs `herdr pane split --pane <anchorPaneId> --direction right --no-focus
- * [--cwd <cwd>] [--env K=V]...` and returns the new pane's id, taken from
- * `.result.pane.pane_id`. Confirmed by hands-on testing: the new pane is
- * created immediately right of `anchorPaneId` — never at an arbitrary
- * position, and never wherever the server's own focus happens to be — and
- * `--no-focus` keeps focus from moving to it. `--cwd`/`--env` apply to the
- * new pane's own shell, same as they would to a fresh terminal.
+ * `.result.pane` shape of `herdr pane get`, as much of it as this module
+ * cares about — just the `label` a prior `pane rename` set (confirmed by
+ * hands-on testing).
+ */
+function isHerdrPaneGetPane(value: unknown): value is { label?: string } {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  const v = value as { label?: unknown };
+  return v.label === undefined || typeof v.label === 'string';
+}
+
+/**
+ * Runs `herdr pane get <paneId>` and returns `.result.pane.label`, or
+ * `undefined` if the command fails, its stdout isn't JSON, the shape doesn't
+ * match, or the pane simply has no label. Same "skip this step" `undefined`
+ * contract as `herdrPaneList`/`herdrTabList`/`herdrPaneLayout` — used only by
+ * `decideWtshuntTabPlacement` to check whether a candidate pane is the
+ * dedicated tab's own ui pane (labeled `wtshunt-ui` by `createWtshuntTab`); a
+ * lookup failure is treated exactly like an outright label mismatch by that
+ * caller, since either way there's no confirmed ui pane to anchor on.
+ */
+async function herdrPaneGet(herdrBin: string, paneId: string): Promise<string | undefined> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'get', paneId]));
+  } catch {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(stdout) as { result?: { pane?: unknown } };
+    const pane = parsed.result?.pane;
+    return isHerdrPaneGetPane(pane) ? pane.label : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Where a new pane lands relative to its anchor — see `herdrPaneSplit`'s doc comment. */
+interface HerdrSplitPlacement {
+  direction: 'right' | 'down';
+  /**
+   * Fraction of height/width the *anchor* pane keeps after the split
+   * (confirmed by hands-on testing: `--direction down --ratio 0.3` leaves
+   * the anchor pane above at 30% of the tab's height and the new pane below
+   * with the remaining 70%). `undefined` omits `--ratio` entirely and lets
+   * herdr split evenly — every plain `--direction right` split (the
+   * overwhelming majority) does this; only the dedicated "wtshunt" tab's
+   * ui-pane-stays-on-top split passes one.
+   */
+  ratio?: number;
+}
+
+/**
+ * Runs `herdr pane split --pane <anchorPaneId> --direction <right|down>
+ * --no-focus [--ratio <ratio>] [--cwd <cwd>] [--env K=V]...` and returns the
+ * new pane's id, taken from `.result.pane.pane_id`. Confirmed by hands-on
+ * testing: the new pane is created immediately right of (or below, for
+ * `direction: 'down'`) `anchorPaneId` — never at an arbitrary position, and
+ * never wherever the server's own focus happens to be — and `--no-focus`
+ * keeps focus from moving to it. `--cwd`/`--env` apply to the new pane's own
+ * shell, same as they would to a fresh terminal. `placement` defaults to a
+ * plain even `right` split, which is all every caller except the dedicated
+ * "wtshunt" tab's layout logic (`createWtshuntTab`/`decideWtshuntTabPlacement`)
+ * ever needs.
  *
  * Unlike every other herdr helper in this module, this one throws (either
  * `execFileAsync`'s own rejection on a nonzero exit, or an explicit `Error`
  * if an exit-0 response is missing `pane_id`) instead of returning
  * `undefined` on failure — see `herdrMux`'s doc comment for why: without a
- * pane, there's nowhere for `serve`/`proxy` to run, so the caller has
- * nothing useful to do but let `wtshunt ui` surface the error.
+ * pane, there's nowhere for `serve`/`proxy` (or, for the dedicated tab's own
+ * root pane, `wtshunt ui` itself) to run, so the caller has nothing useful to
+ * do but let `wtshunt ui` surface the error.
  */
-async function herdrPaneSplit(herdrBin: string, anchorPaneId: string, cwd: string | undefined): Promise<string> {
-  const args = ['pane', 'split', '--pane', anchorPaneId, '--direction', 'right', '--no-focus'];
+async function herdrPaneSplit(
+  herdrBin: string,
+  anchorPaneId: string,
+  cwd: string | undefined,
+  placement: HerdrSplitPlacement = { direction: 'right' }
+): Promise<string> {
+  const args = ['pane', 'split', '--pane', anchorPaneId, '--direction', placement.direction, '--no-focus'];
+  if (placement.ratio !== undefined) {
+    args.push('--ratio', String(placement.ratio));
+  }
   if (cwd) {
     args.push('--cwd', cwd);
   }
@@ -354,10 +431,11 @@ async function herdrPaneRun(herdrBin: string, paneId: string, command: string): 
 /**
  * The tracked pane whose order is the closest one below `order` (or, if
  * `order` is `undefined`, the highest tracked order) — `undefined` if
- * `openedPanes` holds nothing that qualifies. Shared by both `herdrMux`
- * flows below: the ordinary split-off-the-last-pane flow anchors on this
- * directly, and the plugin-mode dedicated-tab flow tries this first before
- * falling back to `findAnchorInPluginTab`'s own leftmost-pane lookup.
+ * `openedPanes` holds nothing that qualifies. Shared by every `herdrMux`
+ * flow: the ordinary split-off-the-last-pane flow anchors on this directly,
+ * and both dedicated-tab flows (`placeInExistingPluginTab`,
+ * `tryOpenFromInsideWtshuntTab`) try this first before falling back to
+ * `decideWtshuntTabPlacement`'s own ui-pane-relative lookup.
  */
 function pickTrackedAnchor(openedPanes: Map<number, string>, order: number | undefined): string | undefined {
   let anchorPaneId: string | undefined;
@@ -377,8 +455,9 @@ function pickTrackedAnchor(openedPanes: Map<number, string>, order: number | und
  * (the user closed it, etc.) so it can never be picked as an anchor again.
  * A `pane list` failure only skips this cleanup — `openedPanes` is left as
  * whatever it already held. Returns the panes `pane list` reported (or
- * `undefined` on failure) so a caller that also needs the full list (the
- * plugin-mode flow's own-tab lookup) doesn't have to call it twice.
+ * `undefined` on failure) so a caller that also needs the full list
+ * (`placeInExistingPluginTab`'s own-tab lookup) doesn't have to call it
+ * twice.
  */
 async function cleanupTrackedPanes(herdrBin: string, openedPanes: Map<number, string>): Promise<HerdrPane[] | undefined> {
   const panes = await herdrPaneList(herdrBin);
@@ -393,59 +472,181 @@ async function cleanupTrackedPanes(herdrBin: string, openedPanes: Map<number, st
   return panes;
 }
 
-/** Label the plugin-mode dedicated tab is created/looked up under (see `herdrMux`'s doc comment). */
+/** Label the dedicated tab is created/looked up under (see `herdrMux`'s doc comment). */
 const PLUGIN_TAB_LABEL = 'wtshunt';
 
 /**
- * Picks the anchor pane to split off when the plugin-mode dedicated
- * "wtshunt" tab (`tabId`) already exists. Tries `pickTrackedAnchor` first —
- * same rule as the ordinary flow, so a `wtshunt ui` session that has
- * already placed panes in this tab keeps stacking them left-to-right by
- * `order` exactly like it would outside plugin mode. Only when nothing
- * qualifies there does it fall back to the tab's own leftmost pane: one
- * pane belonging to `tabId` is picked out of `pane list`'s results, then
- * `pane layout --pane <that pane>` (confirmed by hands-on testing to
- * return the *whole* layout of whichever tab that pane belongs to, not
- * just itself, each entry carrying a `rect.x`) finds the one with the
- * smallest `rect.x`.
- *
- * If `pane layout` itself fails, this falls back further to simply
- * whichever of the tab's panes `pane list` happened to report first — not
- * necessarily the leftmost, so a `pane split` off it (which can only ever
- * insert immediately right of its anchor, never left) lands the new pane
- * second-from-left instead of first. That only happens when `pane layout`
- * is already failing, so the occasional out-of-order pane in that
- * degraded case is accepted rather than chased further.
- *
- * Returns `undefined` if `pane list` reports no live panes for `tabId` at
- * all — a tab `tab list` just said exists but that, by the time this asks,
- * has nothing left to split off (e.g. it was closed moments after `tab
- * list` ran). The caller treats that the same as the tab never having
- * existed and creates a fresh one.
+ * Label `createWtshuntTab` gives the dedicated tab's own `wtshunt ui` pane,
+ * so later `open()` calls (in either plugin mode or tab-inner mode) can tell
+ * it apart from the serve/proxy panes below it — see
+ * `decideWtshuntTabPlacement`.
  */
-async function findAnchorInPluginTab(
+const UI_PANE_LABEL = 'wtshunt-ui';
+
+/** Where the next serve/proxy pane should land inside the dedicated "wtshunt" tab — see `decideWtshuntTabPlacement`. */
+interface WtshuntTabPlacement {
+  anchorPaneId: string;
+  direction: 'right' | 'down';
+  ratio?: number;
+}
+
+/** The pane with the smallest `rect.x` among `panes` — ties keep whichever came first. */
+function leftmostPane(panes: HerdrLayoutPane[]): HerdrLayoutPane {
+  return panes.reduce((leftmost, p) => (p.rect.x < leftmost.rect.x ? p : leftmost));
+}
+
+/**
+ * Decides where the next serve/proxy pane goes inside the dedicated
+ * "wtshunt" tab, given `layout` — that tab's full `pane layout` response
+ * (`undefined` if the call itself failed). Shared by plugin mode
+ * (`placeInExistingPluginTab`) and tab-inner mode
+ * (`tryOpenFromInsideWtshuntTab`), which differ only in how they arrive at
+ * `layout` and what `selfPaneId` is.
+ *
+ * The **ui pane** is identified as the pane in the smallest-`rect.y` row
+ * (ties broken by smallest `rect.x` — confirmed by hands-on testing that a
+ * lower `rect.y` means a higher row, and that `pane layout`'s `rect.x`/
+ * `rect.y` reliably tell rows and columns apart, so the dedicated tab's
+ * intended shape — [ui pane spanning the full width] on top, [serve/proxy
+ * panes side by side] below — can be read straight back out of the layout),
+ * confirmed via `pane get` reporting its label as `wtshunt-ui`
+ * (`createWtshuntTab` sets it). When that lookup doesn't pan out — no label
+ * match — `selfPaneId` (only set in tab-inner mode, where the caller's own
+ * pane, `HERDR_PANE_ID`, is known to already be the tab's `wtshunt ui`; left
+ * `undefined` in plugin mode, whose own pane is the unrelated overlay) is
+ * tried next by looking it up directly in `layout`. Only once *both* come up
+ * empty — or `layout` itself is `undefined`/empty — does this fall back to
+ * `layoutFailureAnchorPaneId` with a plain rightward split: the same "just
+ * pick *a* pane in the tab, leftmost if `pane layout` says so" behavior the
+ * dedicated-tab flow has always had, now reserved for a tab that predates
+ * the ui-pane convention or a `pane layout` call that failed outright.
+ *
+ * Once a ui pane is settled on: a pane already below it (`rect.y` greater)
+ * means serve/proxy panes are already there, so the leftmost one of those is
+ * split rightward, keeping the row lined up left-to-right same as the
+ * ordinary flow's own list-order placement. An empty row below instead
+ * splits the ui pane itself downward at `ratio: 0.3` — confirmed by hands-on
+ * testing that the *anchor* side of a `--direction down --ratio` split (here,
+ * the ui pane) is the side that keeps `ratio`, so the ui pane keeps 30% of
+ * the tab's height and the first serve/proxy pane takes the remaining 70%.
+ */
+async function decideWtshuntTabPlacement(
+  herdrBin: string,
+  layout: HerdrLayoutPane[] | undefined,
+  layoutFailureAnchorPaneId: string,
+  selfPaneId: string | undefined
+): Promise<WtshuntTabPlacement> {
+  if (layout === undefined || layout.length === 0) {
+    return { anchorPaneId: layoutFailureAnchorPaneId, direction: 'right' };
+  }
+
+  const topRowY = layout.reduce((minY, p) => Math.min(minY, p.rect.y), Infinity);
+  const topRowCandidate = leftmostPane(layout.filter((p) => p.rect.y === topRowY));
+  const candidateLabel = await herdrPaneGet(herdrBin, topRowCandidate.pane_id);
+
+  const uiPane: HerdrLayoutPane | undefined =
+    candidateLabel === UI_PANE_LABEL
+      ? topRowCandidate
+      : selfPaneId !== undefined
+        ? layout.find((p) => p.pane_id === selfPaneId)
+        : undefined;
+
+  if (uiPane === undefined) {
+    return { anchorPaneId: leftmostPane(layout).pane_id, direction: 'right' };
+  }
+
+  const belowUiPane = layout.filter((p) => p.rect.y > uiPane.rect.y);
+  if (belowUiPane.length > 0) {
+    return { anchorPaneId: leftmostPane(belowUiPane).pane_id, direction: 'right' };
+  }
+
+  return { anchorPaneId: uiPane.pane_id, direction: 'down', ratio: 0.3 };
+}
+
+/**
+ * Splits `anchorPaneId` per `placement`, then renames and runs `command` in
+ * the new pane, tracking it in `openedPanes` under `order` if given. Shared
+ * by every dedicated-tab placement path (plugin mode, tab-inner mode, and
+ * fresh-tab creation) — the ordinary flow below inlines the same three calls
+ * itself, since it only ever needs the default rightward placement.
+ */
+async function splitRenameRun(
+  herdrBin: string,
+  anchorPaneId: string,
+  placement: HerdrSplitPlacement,
+  { title, command, cwd, order }: MuxOpenOptions,
+  openedPanes: Map<number, string>
+): Promise<void> {
+  const newPaneId = await herdrPaneSplit(herdrBin, anchorPaneId, cwd, placement);
+  await herdrPaneRename(herdrBin, newPaneId, sanitizeLabel(title));
+  await herdrPaneRun(herdrBin, newPaneId, `exec ${command}`);
+  if (order !== undefined) {
+    openedPanes.set(order, newPaneId);
+  }
+}
+
+/**
+ * Creates the dedicated "wtshunt" tab from scratch: `herdr tab create
+ * --label wtshunt --no-focus [--env K=V]...` (no `--cwd` — the ui pane's
+ * `wtshunt ui` doesn't depend on which directory it starts in, unlike
+ * `serve`/`proxy`), then labels its root pane `wtshunt-ui` and runs
+ * `wtshunt ui` in it via `exec` (same "the command *is* the pane's root
+ * process, so the pane closes when it exits" reasoning as every other pane
+ * this module opens — here that means the ui pane closes, and takes the rest
+ * of the tab with it, only if `wtshunt ui` itself is quit). The row's own
+ * serve/proxy pane is then split off *that* root pane with `--direction down
+ * --ratio 0.3`, so the ui pane keeps the top 30% and today's row lands
+ * directly below it, and is renamed/run/tracked exactly like any other
+ * placement (`splitRenameRun`).
+ */
+async function createWtshuntTab(herdrBin: string, openedPanes: Map<number, string>, options: MuxOpenOptions): Promise<void> {
+  const rootPaneId = await herdrTabCreate(herdrBin, undefined, PLUGIN_TAB_LABEL);
+  await herdrPaneRename(herdrBin, rootPaneId, UI_PANE_LABEL);
+  await herdrPaneRun(herdrBin, rootPaneId, `exec ${wtshuntCommand('ui')}`);
+
+  await splitRenameRun(herdrBin, rootPaneId, { direction: 'down', ratio: 0.3 }, options, openedPanes);
+}
+
+/**
+ * Places `options` inside the dedicated "wtshunt" tab (`tabId`), which is
+ * already known to exist. Tries `pickTrackedAnchor` first — same rule as the
+ * ordinary flow, so a `wtshunt ui` session that has already placed panes in
+ * this tab keeps stacking them left-to-right by `order`, and (confirmed by
+ * the tests) never even calls `pane layout`/`pane get` to do it. Only when
+ * nothing qualifies there does it look up the tab's own layout — one pane
+ * belonging to `tabId` is picked out of `pane list`'s results as a jumping-
+ * off point for `pane layout`, then `decideWtshuntTabPlacement` takes it from
+ * there.
+ *
+ * Returns `false` if `pane list` reports no live panes for `tabId` at all —
+ * a `tab list` just said it exists but that, by the time this asks, has
+ * nothing left to split off (e.g. it was closed moments after `tab list`
+ * ran). The caller treats that the same as the tab never having existed and
+ * creates a fresh one.
+ */
+async function placeInExistingPluginTab(
   herdrBin: string,
   tabId: string,
   openedPanes: Map<number, string>,
-  order: number | undefined
-): Promise<string | undefined> {
+  options: MuxOpenOptions
+): Promise<boolean> {
   const panes = await cleanupTrackedPanes(herdrBin, openedPanes);
 
-  const tracked = pickTrackedAnchor(openedPanes, order);
+  const tracked = pickTrackedAnchor(openedPanes, options.order);
   if (tracked !== undefined) {
-    return tracked;
+    await splitRenameRun(herdrBin, tracked, { direction: 'right' }, options, openedPanes);
+    return true;
   }
 
   const tabPanes = (panes ?? []).filter((p) => p.tab_id === tabId);
   if (tabPanes.length === 0) {
-    return undefined;
+    return false;
   }
 
   const layout = await herdrPaneLayout(herdrBin, tabPanes[0].pane_id);
-  if (layout !== undefined && layout.length > 0) {
-    return layout.reduce((leftmost, p) => (p.rect.x < leftmost.rect.x ? p : leftmost)).pane_id;
-  }
-  return tabPanes[0].pane_id;
+  const placement = await decideWtshuntTabPlacement(herdrBin, layout, tabPanes[0].pane_id, undefined);
+  await splitRenameRun(herdrBin, placement.anchorPaneId, placement, options, openedPanes);
+  return true;
 }
 
 /**
@@ -454,19 +655,14 @@ async function findAnchorInPluginTab(
  * bookkeeping can't be trusted — `HERDR_WORKSPACE_ID` isn't set, or `tab
  * list` itself failed — so the caller falls through to the ordinary
  * split-off-the-anchor flow exactly as if `HERDR_PLUGIN_ID` had never been
- * set. Returns `true` once it has fully placed and started the pane
- * (tracking it in `openedPanes` if `order` was given, same as the ordinary
- * flow). Past the gate, failures propagate instead of triggering a
- * fallback: `herdrPaneSplit`/`herdrTabCreate`/`herdrPaneRun` still throw on
- * failure here for the same reason they do in the ordinary flow — a pane
- * that can't be created or started leaves `wtshunt ui` with nothing useful
- * to silently paper over.
+ * set. Returns `true` once it has fully placed and started the pane. Past
+ * the gate, failures propagate instead of triggering a fallback:
+ * `herdrPaneSplit`/`herdrTabCreate`/`herdrPaneRun` still throw on failure
+ * here for the same reason they do in the ordinary flow — a pane that can't
+ * be created or started leaves `wtshunt ui` with nothing useful to silently
+ * paper over.
  */
-async function tryOpenInPluginTab(
-  herdrBin: string,
-  openedPanes: Map<number, string>,
-  { title, command, cwd, order }: MuxOpenOptions
-): Promise<boolean> {
+async function tryOpenInPluginTab(herdrBin: string, openedPanes: Map<number, string>, options: MuxOpenOptions): Promise<boolean> {
   const workspaceId = process.env.HERDR_WORKSPACE_ID;
   if (workspaceId === undefined) {
     return false;
@@ -478,31 +674,81 @@ async function tryOpenInPluginTab(
   }
   const existingTab = tabs.find((t) => t.label === PLUGIN_TAB_LABEL);
 
-  let newPaneId: string;
   if (existingTab === undefined) {
-    // No "wtshunt" tab yet — create it and use its root pane directly as
-    // the first pane placed in it. No `pane split` here: there's nothing to
-    // split off yet, and splitting the fresh tab's own root pane would just
-    // leave a spare idle shell pane behind alongside the one actually
-    // running `command`.
-    newPaneId = await herdrTabCreate(herdrBin, cwd, PLUGIN_TAB_LABEL);
-  } else {
-    const anchor = await findAnchorInPluginTab(herdrBin, existingTab.tab_id, openedPanes, order);
-    newPaneId =
-      anchor !== undefined
-        ? await herdrPaneSplit(herdrBin, anchor, cwd)
-        // The tab `tab list` reported turned out to have no live panes by
-        // the time `pane list` was asked — treat it the same as "no tab
-        // yet" rather than splitting off nothing.
-        : await herdrTabCreate(herdrBin, cwd, PLUGIN_TAB_LABEL);
+    await createWtshuntTab(herdrBin, openedPanes, options);
+    return true;
   }
 
-  await herdrPaneRename(herdrBin, newPaneId, sanitizeLabel(title));
-  await herdrPaneRun(herdrBin, newPaneId, `exec ${command}`);
-
-  if (order !== undefined) {
-    openedPanes.set(order, newPaneId);
+  const handled = await placeInExistingPluginTab(herdrBin, existingTab.tab_id, openedPanes, options);
+  if (!handled) {
+    // The tab `tab list` reported turned out to have no live panes by the
+    // time `pane list` was asked — treat it the same as "no tab yet" rather
+    // than splitting off nothing.
+    await createWtshuntTab(herdrBin, openedPanes, options);
   }
+  return true;
+}
+
+/**
+ * Tab-inner-mode gate for `herdrMux.open()` (see `herdrMux`'s doc comment).
+ * Unlike plugin mode, there's no separate overlay pane here — the process
+ * calling `open()` is itself running as a pane inside some tab, and this
+ * only proceeds when that tab *is* the dedicated "wtshunt" tab (checked via
+ * `HERDR_TAB_ID` against `tab list --workspace <HERDR_WORKSPACE_ID>`'s own
+ * `tab_id`s, since herdr doesn't expose a tab's own label any other way).
+ * Returns `false` — falling through to the ordinary flow — when
+ * `HERDR_TAB_ID`/`HERDR_WORKSPACE_ID` aren't set, `tab list` fails, or the
+ * tab it finds isn't labeled `wtshunt`: none of those can happen for a
+ * `wtshunt ui` opened via `createWtshuntTab`, but do for `wtshunt ui`
+ * started directly in some unrelated tab.
+ *
+ * Once confirmed, this is `placeInExistingPluginTab`'s counterpart for a
+ * tab that's already known to exist and need not be searched for via `pane
+ * list`'s `tab_id` field: `pane layout` is queried directly off the caller's
+ * own pane (`HERDR_PANE_ID`), and that same pane is passed to
+ * `decideWtshuntTabPlacement` as `selfPaneId` — the fallback for when the
+ * ui-pane label lookup doesn't land on a match, since a `wtshunt ui` running
+ * inside the "wtshunt" tab *is* that tab's ui pane by construction, label or
+ * not.
+ */
+async function tryOpenFromInsideWtshuntTab(
+  herdrBin: string,
+  openedPanes: Map<number, string>,
+  options: MuxOpenOptions
+): Promise<boolean> {
+  const tabId = process.env.HERDR_TAB_ID;
+  const workspaceId = process.env.HERDR_WORKSPACE_ID;
+  if (tabId === undefined || workspaceId === undefined) {
+    return false;
+  }
+
+  const tabs = await herdrTabList(herdrBin, workspaceId);
+  if (tabs === undefined) {
+    return false;
+  }
+  const ownTab = tabs.find((t) => t.tab_id === tabId);
+  if (ownTab === undefined || ownTab.label !== PLUGIN_TAB_LABEL) {
+    return false;
+  }
+
+  await cleanupTrackedPanes(herdrBin, openedPanes);
+  const tracked = pickTrackedAnchor(openedPanes, options.order);
+  if (tracked !== undefined) {
+    await splitRenameRun(herdrBin, tracked, { direction: 'right' }, options, openedPanes);
+    return true;
+  }
+
+  const ownPaneId = process.env.HERDR_PANE_ID;
+  if (ownPaneId === undefined) {
+    // Shouldn't happen for a pane genuinely running inside a herdr tab, but
+    // without it there's no anchor to fall back to either — let the caller
+    // fall through to the ordinary flow instead of guessing.
+    return false;
+  }
+
+  const layout = await herdrPaneLayout(herdrBin, ownPaneId);
+  const placement = await decideWtshuntTabPlacement(herdrBin, layout, ownPaneId, ownPaneId);
+  await splitRenameRun(herdrBin, placement.anchorPaneId, placement, options, openedPanes);
   return true;
 }
 
@@ -554,28 +800,57 @@ async function tryOpenInPluginTab(
  * `proxy` to run — unlike, say, a failed `pane rename`, which only costs a
  * label and is swallowed instead (see `herdrPaneRename`).
  *
- * **Plugin mode.** `wtshunt` also ships as a herdr plugin
- * (`herdr-plugin.toml`) whose `ui` pane opens `wtshunt ui` as an `overlay`
- * — a pane that floats over whichever tab the user was actually working
- * in, rather than living inside it. Splitting off that overlay pane (i.e.
- * off `HERDR_PANE_ID` as usual) would therefore insert the new `serve`/
- * `proxy` pane into whatever tab happened to be underneath, confirmed by
- * hands-on testing to really happen: opening `serve`/`proxy` from the
- * overlay this way interrupts whatever the user was actually looking at,
- * exactly the scenario this adapter exists to give panes a stable home
- * outside of. So whenever this pane was started by herdr as a plugin
- * entrypoint — detected via `HERDR_PLUGIN_ID` being set in the environment
- * (herdr sets it, along with `HERDR_PLUGIN_ROOT`/
+ * **Dedicated "wtshunt" tab (plugin mode and tab-inner mode).** `wtshunt`
+ * also ships as a herdr plugin (`herdr-plugin.toml`) whose `ui` pane opens
+ * `wtshunt ui` as an `overlay` — a pane that floats over whichever tab the
+ * user was actually working in, rather than living inside it. Splitting off
+ * that overlay pane (i.e. off `HERDR_PANE_ID` as usual) would therefore
+ * insert the new `serve`/`proxy` pane into whatever tab happened to be
+ * underneath, confirmed by hands-on testing to really happen: opening
+ * `serve`/`proxy` from the overlay this way interrupts whatever the user was
+ * actually looking at, exactly the scenario this adapter exists to give
+ * panes a stable home outside of. So whenever this pane was started by herdr
+ * as a plugin entrypoint — detected via `HERDR_PLUGIN_ID` being set in the
+ * environment (herdr sets it, along with `HERDR_PLUGIN_ROOT`/
  * `HERDR_PLUGIN_ENTRYPOINT_ID`, only for plugin-pane commands; it's unset
  * for a `wtshunt ui` started directly in an ordinary pane) — `open()`
  * instead routes through `tryOpenInPluginTab`, which collects every
  * `serve`/`proxy` pane into one dedicated tab labeled "wtshunt" in the
  * current workspace (`HERDR_WORKSPACE_ID`), creating that tab on first use,
- * and never touches whichever tab the user is actually looking at. The
- * ordinary flow below is unchanged and still what runs for a `wtshunt ui`
- * started directly in a pane (no plugin involved), and is also what
- * `tryOpenInPluginTab` itself falls back to when its own bookkeeping can't
- * be trusted (see its doc comment).
+ * and never touches whichever tab the user is actually looking at.
+ *
+ * That dedicated tab is laid out with `wtshunt ui` itself pinned across the
+ * top and every `serve`/`proxy` pane lined up side by side underneath, in
+ * list order — see `decideWtshuntTabPlacement`/`createWtshuntTab` for the
+ * mechanics. Two things motivate keeping `wtshunt ui` in the tab at all,
+ * rather than only ever splitting bare serve/proxy panes off each other: a
+ * tab whose only panes are `serve`/`proxy` disappears the moment the last of
+ * them is stopped (nothing left running inside it), taking the whole tab —
+ * and the user's place in it — down with it; and having `wtshunt ui` inside
+ * the tab, not just the floating overlay, gives a second, persistent place
+ * to drive `serve`/`proxy` from without needing the overlay keybinding at
+ * all.
+ *
+ * That second entry point is **tab-inner mode**: a `wtshunt ui` started
+ * directly inside a pane (`HERDR_PLUGIN_ID` unset, so plugin mode's own gate
+ * never fires) still ends up placing panes into the same dedicated layout,
+ * *if* the pane it's running in is itself inside the "wtshunt" tab already —
+ * checked by `tryOpenFromInsideWtshuntTab` via `HERDR_TAB_ID`/
+ * `HERDR_WORKSPACE_ID` against `tab list`'s own tab labels, since a plain
+ * pane's env carries `HERDR_PANE_ID`/`HERDR_TAB_ID`/`HERDR_WORKSPACE_ID` but
+ * never `HERDR_PLUGIN_ID` (confirmed by hands-on testing — that var really
+ * is plugin-entrypoint-only). Pressing `s`/`p` inside a `wtshunt ui` that's
+ * sitting in the top pane of its own "wtshunt" tab therefore lands the new
+ * pane in the same bottom row a plugin-mode overlay would have used, instead
+ * of splitting `wtshunt ui`'s own pane directly (which the ordinary flow
+ * would otherwise do, since `HERDR_PANE_ID` would be the only anchor it
+ * knows about).
+ *
+ * The ordinary flow below is unchanged and is what runs for a `wtshunt ui`
+ * started directly in a pane outside of any "wtshunt" tab (no plugin
+ * involved, tab-inner mode's own check declining), and is also what
+ * `tryOpenInPluginTab`/`tryOpenFromInsideWtshuntTab` themselves fall back to
+ * when their bookkeeping can't be trusted (see their doc comments).
  */
 export function herdrMux(options: HerdrMuxOptions = {}): Mux {
   const herdrBin = options.herdrBin ?? 'herdr';
@@ -593,6 +868,15 @@ export function herdrMux(options: HerdrMuxOptions = {}): Mux {
         // HERDR_WORKSPACE_ID wasn't set, or `tab list` itself failed —
         // falls through to the ordinary flow below exactly as if
         // HERDR_PLUGIN_ID had never been set.
+      } else {
+        const handled = await tryOpenFromInsideWtshuntTab(herdrBin, openedPanes, { title, command, cwd, order });
+        if (handled) {
+          return;
+        }
+        // HERDR_TAB_ID/HERDR_WORKSPACE_ID weren't set, `tab list` itself
+        // failed, or this pane's own tab isn't labeled "wtshunt" — falls
+        // through to the ordinary flow below exactly as if tab-inner mode
+        // had never been checked.
       }
 
       // Drop anything wtshunt placed previously that's no longer among the

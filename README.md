@@ -466,9 +466,13 @@ description = "wtshunt ui"
 ```
 
 Opening `serve`/`proxy` from that overlay never splits whichever tab
-you were actually working in: they're collected into one dedicated
-`wtshunt` tab in the current workspace instead, created the first time
-it's needed.
+you were actually working in: they land in one dedicated `wtshunt`
+tab in the current workspace instead, created the first time it's
+needed. That tab keeps `wtshunt ui` itself pinned across the top row,
+with `serve`/`proxy` panes lined up side by side in the row below it,
+in list order. The tab survives even once every server is stopped,
+and the `wtshunt ui` running inside it can open panes too: pressing
+`s`/`p` there lands in the same row.
 
 ## Tasks (experimental)
 
