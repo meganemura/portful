@@ -66,8 +66,9 @@ function isBinOnPath(bin: string): boolean {
 }
 
 /**
- * `tmux new-window`/`herdr agent start` both spawn the new pane's shell with
- * the multiplexer server's own stored environment, not this process's — so
+ * `tmux new-window`/`herdr pane split`/`herdr tab create` all spawn the new
+ * pane's shell with the multiplexer server's own stored environment, not
+ * this process's — so
  * a custom `XDG_CONFIG_HOME`/`XDG_STATE_HOME` set only for this invocation
  * (rather than sourced by the user's shell rc files) would otherwise
  * silently fall back to the default paths in the new pane. Forwarded
@@ -116,7 +117,7 @@ export function templateMux(template: string): Mux {
 }
 
 export interface HerdrMuxOptions {
-  /** Overrides the binary invoked for every herdr subcommand this adapter runs (`agent start`, `pane list`, `pane neighbor`, `pane swap`) — for tests only, so the real `herdr` is never exercised. */
+  /** Overrides the binary invoked for every herdr subcommand this adapter runs (`pane list`, `pane split`, `pane rename`, `pane run`, `tab create`) — for tests only, so the real `herdr` is never exercised. */
   herdrBin?: string;
 }
 
@@ -134,9 +135,9 @@ function isHerdrPane(value: unknown): value is HerdrPane {
  * the command fails, its stdout isn't JSON, or the shape doesn't match what
  * hands-on inspection confirmed (`{"result":{"panes":[{"pane_id":...},
  * ...]}}`). `undefined` is the "skip this step" signal used throughout
- * `herdrMux` below — never thrown, since a `pane list` hiccup shouldn't
- * stop `agent start` (or the swap-bubbling that follows it) from still
- * doing its job.
+ * `herdrMux` below — never thrown, since a `pane list` hiccup should only
+ * skip the anchor-cleanup step that calls it, not stop pane creation
+ * (`pane split`/`tab create`) from still doing its job.
  */
 async function herdrPaneList(herdrBin: string): Promise<HerdrPane[] | undefined> {
   let stdout: string;
@@ -155,273 +156,140 @@ async function herdrPaneList(herdrBin: string): Promise<HerdrPane[] | undefined>
 }
 
 /**
- * Extracts `result.agent.pane_id` from `herdr agent start`'s own stdout —
- * confirmed by hands-on testing to always be present on success
- * (`{"result":{"agent":{"pane_id":"w5:p2",...},"type":"agent_started"}}`),
- * which is far more robust than the diff-based approach this replaced (see
- * `herdrMux`'s doc comment). `undefined` if stdout isn't JSON or the field
- * isn't a string.
+ * Runs `herdr pane split --pane <anchorPaneId> --direction right --no-focus
+ * [--cwd <cwd>] [--env K=V]...` and returns the new pane's id, taken from
+ * `.result.pane.pane_id`. Confirmed by hands-on testing: the new pane is
+ * created immediately right of `anchorPaneId` — never at an arbitrary
+ * position, and never wherever the server's own focus happens to be — and
+ * `--no-focus` keeps focus from moving to it. `--cwd`/`--env` apply to the
+ * new pane's own shell, same as they would to a fresh terminal.
+ *
+ * Unlike every other herdr helper in this module, this one throws (either
+ * `execFileAsync`'s own rejection on a nonzero exit, or an explicit `Error`
+ * if an exit-0 response is missing `pane_id`) instead of returning
+ * `undefined` on failure — see `herdrMux`'s doc comment for why: without a
+ * pane, there's nowhere for `serve`/`proxy` to run, so the caller has
+ * nothing useful to do but let `wtshunt ui` surface the error.
  */
-function parseAgentStartPaneId(stdout: string): string | undefined {
+async function herdrPaneSplit(herdrBin: string, anchorPaneId: string, cwd: string | undefined): Promise<string> {
+  const args = ['pane', 'split', '--pane', anchorPaneId, '--direction', 'right', '--no-focus'];
+  if (cwd) {
+    args.push('--cwd', cwd);
+  }
+  args.push(...envForwardArgs('--env'));
+  const { stdout } = await execFileAsync(herdrBin, args);
+  const parsed = JSON.parse(stdout) as { result?: { pane?: { pane_id?: unknown } } };
+  const paneId = parsed.result?.pane?.pane_id;
+  if (typeof paneId !== 'string') {
+    throw new Error(`herdr pane split did not return a pane_id: ${stdout}`);
+  }
+  return paneId;
+}
+
+/**
+ * Fallback for when there's no anchor pane to split from at all (see
+ * `herdrMux`'s doc comment). Runs `herdr tab create --workspace <id>
+ * --cwd <cwd> --env K=V... --no-focus` (`--workspace` only when
+ * `HERDR_WORKSPACE_ID` is set) and returns the new tab's root pane id, taken
+ * from `.result.root_pane.pane_id`. Same throw-on-failure behavior as
+ * `herdrPaneSplit`, for the same reason.
+ */
+async function herdrTabCreate(herdrBin: string, cwd: string | undefined): Promise<string> {
+  const args = ['tab', 'create'];
+  const workspaceId = process.env.HERDR_WORKSPACE_ID;
+  if (workspaceId !== undefined) {
+    args.push('--workspace', workspaceId);
+  }
+  if (cwd) {
+    args.push('--cwd', cwd);
+  }
+  args.push(...envForwardArgs('--env'));
+  args.push('--no-focus');
+  const { stdout } = await execFileAsync(herdrBin, args);
+  const parsed = JSON.parse(stdout) as { result?: { root_pane?: { pane_id?: unknown } } };
+  const paneId = parsed.result?.root_pane?.pane_id;
+  if (typeof paneId !== 'string') {
+    throw new Error(`herdr tab create did not return a pane_id: ${stdout}`);
+  }
+  return paneId;
+}
+
+/**
+ * Runs `herdr pane rename <paneId> <label>`, labeling the pane. Failure
+ * (nonzero exit, or any other rejection) is swallowed: a missing label is
+ * cosmetic, not worth failing the whole `open()` call over when the pane
+ * itself was already created successfully.
+ */
+async function herdrPaneRename(herdrBin: string, paneId: string, label: string): Promise<void> {
   try {
-    const parsed = JSON.parse(stdout) as { result?: { agent?: { pane_id?: unknown } } };
-    const paneId = parsed.result?.agent?.pane_id;
-    return typeof paneId === 'string' ? paneId : undefined;
+    await execFileAsync(herdrBin, ['pane', 'rename', paneId, label]);
   } catch {
-    return undefined;
+    // Cosmetic only — the pane still exists and can still run its command.
   }
 }
 
 /**
- * Runs `herdr pane neighbor --direction <direction> --pane <paneId>`.
- * Confirmed by hands-on testing to exit 0 either way: with a neighbor,
- * `result.neighbor.neighbor_pane_id` holds its id; with none, that field is
- * simply absent. That distinction is preserved in the return type — `{
- * paneId }` (where `paneId` may itself be `undefined`, meaning "no
- * neighbor") for a successful call, vs. bare `undefined` for a failed one
- * (nonzero exit or unparseable stdout), which callers treat as "give up".
+ * Runs `herdr pane run <paneId> <command>`, which types `command` into the
+ * pane's shell followed by Enter (confirmed by hands-on testing: exit 0 and
+ * empty stdout on success). Confirmed safe to call immediately after
+ * `herdrPaneSplit`/`herdrTabCreate` with no delay in between — the pty's own
+ * type-ahead buffer holds the keystrokes even if the shell isn't fully
+ * ready yet, so nothing has ever been observed to get lost. Throws on
+ * failure (propagating `execFileAsync`'s rejection), same "nothing useful
+ * to do but surface it" reasoning as `herdrPaneSplit` — a pane that exists
+ * but never got its command is as useless to the caller as no pane at all.
  */
-async function herdrPaneNeighbor(
-  herdrBin: string,
-  direction: 'left' | 'right',
-  paneId: string
-): Promise<{ paneId: string | undefined } | undefined> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'neighbor', '--direction', direction, '--pane', paneId]));
-  } catch {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(stdout) as { result?: { neighbor?: { neighbor_pane_id?: unknown } } };
-    const neighborPaneId = parsed.result?.neighbor?.neighbor_pane_id;
-    return { paneId: typeof neighborPaneId === 'string' ? neighborPaneId : undefined };
-  } catch {
-    return undefined;
-  }
+async function herdrPaneRun(herdrBin: string, paneId: string, command: string): Promise<void> {
+  await execFileAsync(herdrBin, ['pane', 'run', paneId, command]);
 }
 
 /**
- * Runs `herdr pane swap --source-pane <sourcePaneId> --target-pane
- * <targetPaneId>`, which exchanges two panes' positions within a tab.
- * Returns `false` on any failure (nonzero exit or unparseable stdout) — the
- * caller's response is always the same, silently stop bubbling and leave
- * the pane where it is.
- */
-async function herdrPaneSwap(herdrBin: string, sourcePaneId: string, targetPaneId: string): Promise<boolean> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'swap', '--source-pane', sourcePaneId, '--target-pane', targetPaneId]));
-  } catch {
-    return false;
-  }
-  try {
-    JSON.parse(stdout);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Upper bound on `bubbleIntoPlace`'s swap loop, so a herdr response that never satisfies its stop condition can't spin forever. */
-const MAX_BUBBLE_SWAPS = 16;
-
-/**
- * Slides `newPaneId` right, one `pane swap` at a time, until it's
- * immediately right of `basePaneId` — or until a failure or the
- * `MAX_BUBBLE_SWAPS` cap stops it early, in which case the pane just stays
- * wherever it ended up.
+ * Priority 2: herdr, detected via `HERDR_ENV`/`HERDR_SOCKET_PATH`.
  *
- * `agent start --split right` always inserts the new pane immediately
- * right of the tab's current pane (in practice, `wtshunt ui`'s own pane —
- * see `herdrMux`'s doc comment), never at an arbitrary caller-chosen
- * anchor. So instead of one call that places it directly, each loop
- * iteration walks it one step:
+ * herdr's own docs are explicit about which command family a process like
+ * `wtshunt ui` should use here: "Use `herdr pane ...` commands for ordinary
+ * terminals, servers, tests, shells, and low-level terminal input. For
+ * example, use `pane split` and `pane run` for `cargo test`, not `agent
+ * start`, unless that terminal is intentionally being treated as an agent
+ * target." `serve`/`proxy` are exactly that kind of ordinary long-running
+ * server process, not an agent — so this adapter opens panes with `pane
+ * split` + `pane rename` + `pane run`, never `agent start`.
  *
- *   1. `pane neighbor --direction left` of the new pane. If that's already
- *      `basePaneId`, it's in place — stop.
- *   2. `pane neighbor --direction right` of the new pane. If there is none,
- *      it's at the right edge — stop (nothing left to swap past).
- *   3. `pane swap` the new pane with that right neighbor, then repeat from
- *      1 — the new pane is now one position further right.
+ * That choice also removes a whole layer an earlier version of this
+ * adapter needed: `agent start --split right` could only ever insert the
+ * new pane immediately right of the tab's *current* pane, with no way to
+ * name an arbitrary anchor, so lining panes up to match `wtshunt ui`'s own
+ * list order (`MuxOpenOptions.order`) required `pane swap`-based
+ * "bubbling" after the fact, plus a focus-restore walk to undo a side
+ * effect of swapping. `pane split --pane <anchor>` takes the anchor
+ * directly and (confirmed by hands-on testing) always inserts the new pane
+ * immediately right of it, so list-order placement now falls out of
+ * choosing the right anchor up front — no swapping, no focus ever moves,
+ * nothing to restore.
  *
- * Returns whether at least one swap actually ran. Confirmed by hands-on
- * testing, `pane swap --source-pane <a> --target-pane <b>` moves focus to
- * `a` as a side effect of swapping — here, always the new pane — so the
- * return value tells the caller whether focus needs restoring afterward
- * (see `restoreFocus`). Zero swaps means focus was never touched.
- */
-async function bubbleIntoPlace(herdrBin: string, newPaneId: string, basePaneId: string): Promise<boolean> {
-  let swapped = false;
-  for (let i = 0; i < MAX_BUBBLE_SWAPS; i++) {
-    const left = await herdrPaneNeighbor(herdrBin, 'left', newPaneId);
-    if (left === undefined || left.paneId === basePaneId) {
-      return swapped;
-    }
-    const right = await herdrPaneNeighbor(herdrBin, 'right', newPaneId);
-    if (right === undefined || right.paneId === undefined) {
-      return swapped;
-    }
-    const didSwap = await herdrPaneSwap(herdrBin, newPaneId, right.paneId);
-    if (!didSwap) {
-      return swapped;
-    }
-    swapped = true;
-  }
-  return swapped;
-}
-
-/** Upper bound on `restoreFocus`'s walk-left loop, so a herdr response that never satisfies its stop condition can't spin forever. */
-const MAX_FOCUS_RESTORE_STEPS = 8;
-
-/**
- * Runs `herdr pane layout --pane <paneId>` and returns
- * `.result.layout.focused_pane_id` — the id of whichever pane currently has
- * focus within `paneId`'s tab (confirmed by hands-on testing: `paneId` need
- * not itself be the focused pane — any pane in the tab reports the same tab
- * -wide focus). `undefined` on any failure: nonzero exit, unparseable
- * stdout, or the field missing/non-string — the same "give up silently"
- * signal used throughout this module.
- */
-async function herdrPaneLayout(herdrBin: string, paneId: string): Promise<string | undefined> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'layout', '--pane', paneId]));
-  } catch {
-    return undefined;
-  }
-  try {
-    const parsed = JSON.parse(stdout) as { result?: { layout?: { focused_pane_id?: unknown } } };
-    const focusedPaneId = parsed.result?.layout?.focused_pane_id;
-    return typeof focusedPaneId === 'string' ? focusedPaneId : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Runs `herdr pane focus --direction <direction> --pane <paneId>`, which
- * moves focus to whatever pane sits immediately in that direction from
- * `paneId` — confirmed by hands-on testing to focus `paneId`'s *neighbor*,
- * never `paneId` itself. Returns `false` on any failure (nonzero exit or
- * unparseable stdout).
- */
-async function herdrPaneFocus(herdrBin: string, direction: 'left' | 'right' | 'up' | 'down', paneId: string): Promise<boolean> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'focus', '--direction', direction, '--pane', paneId]));
-  } catch {
-    return false;
-  }
-  try {
-    JSON.parse(stdout);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Walks focus back to `uiPaneId` (`wtshunt ui`'s own pane) after a
- * `bubbleIntoPlace` swap stole it — see that function's doc comment for why
- * a swap moves focus at all. There's no herdr API to focus a pane by id
- * directly (`agent focus <pane_id>` only works for agent panes, and
- * `uiPaneId` isn't one), so this walks there one step at a time instead:
+ * The anchor is chosen from `order` (this row's index in `wtshunt ui`'s
+ * list) against `openedPanes`, a map of every order this adapter has
+ * placed so far to the pane it landed in: the closest lower order's pane
+ * if one exists, else `wtshunt ui`'s own pane (`HERDR_PANE_ID`). A row with
+ * no `order` (e.g. a `toggle-proxy` open with no matching list row) is
+ * anchored to the highest order seen so far, or also the ui pane if
+ * nothing's been placed yet. Before choosing it, a single `pane list` call
+ * drops any previously-tracked pane no longer reported as live (the user
+ * closed it, etc.) so it can never be picked as an anchor again — if `pane
+ * list` itself fails, only that cleanup is skipped; placement still
+ * proceeds against whatever `openedPanes` already held.
  *
- *   1. `pane layout --pane uiPaneId` reports the tab's currently-focused
- *      pane. Already `uiPaneId`? Done — stop.
- *   2. `pane focus --direction left --pane <that focused pane>` moves focus
- *      one step further left (to *its* left neighbor, not to itself), then
- *      repeat from 1.
+ * If there's no anchor at all — nothing tracked yet, and `HERDR_PANE_ID`
+ * unset because this `wtshunt ui` wasn't itself started from a herdr pane
+ * — there's nothing to split from, so this falls back to `herdrTabCreate`
+ * instead, opening a fresh tab.
  *
- * Capped at `MAX_FOCUS_RESTORE_STEPS` iterations. Any failure along the way
- * — an unparseable/incomplete `pane layout` response, or a failed `pane
- * focus` call — silently stops the walk wherever it is, same "give up,
- * don't guess" policy as the rest of this module: focus just stays put
- * instead of landing back on the ui pane.
- */
-async function restoreFocus(herdrBin: string, uiPaneId: string): Promise<void> {
-  for (let i = 0; i < MAX_FOCUS_RESTORE_STEPS; i++) {
-    const focusedPaneId = await herdrPaneLayout(herdrBin, uiPaneId);
-    if (focusedPaneId === undefined || focusedPaneId === uiPaneId) {
-      return;
-    }
-    const moved = await herdrPaneFocus(herdrBin, 'left', focusedPaneId);
-    if (!moved) {
-      return;
-    }
-  }
-}
-
-/**
- * Priority 2: herdr, detected via `HERDR_ENV`/`HERDR_SOCKET_PATH`. Uses
- * `herdr agent start <name> --cwd <cwd> --env ... --workspace <id> --tab
- * <id> --split right --no-focus -- sh -c <command>` to create a fresh
- * labeled pane and run a command in it, then walks it into place with
- * `herdr pane swap` (via `bubbleIntoPlace` above) so opening rows out of
- * list order still lines panes up left-to-right in `wtshunt ui`'s own order
- * (see `MuxOpenOptions.order`).
- *
- * Two pitfalls, confirmed by hands-on testing against a real herdr session,
- * shape this implementation:
- *
- * - `agent start` ignores this process's own `HERDR_*` env entirely and
- *   always creates the pane in whichever tab is currently focused
- *   server-side. An earlier version tried steering placement by overriding
- *   `HERDR_PANE_ID` in the child's env — that silently did nothing.
- *   `--workspace`/`--tab` (read from *this* process's own
- *   `HERDR_WORKSPACE_ID`/`HERDR_TAB_ID`, i.e. wherever `wtshunt ui` itself
- *   is running) are passed explicitly instead, so the pane lands in the
- *   right tab even if focus has moved elsewhere. `--split right` always
- *   inserts the new pane immediately right of the tab's current pane — in
- *   practice `wtshunt ui`'s own pane, since `--no-focus` keeps the new pane
- *   from ever becoming "current" itself — so with no further correction,
- *   opening rows top-to-bottom would produce right-to-left panes.
- * - `herdr pane move <id> --tab <t> --split right --target-pane <p>`, the
- *   obvious tool for correcting that, is a documented no-op for a move
- *   within the same tab (`"reason":"same_tab"`, exit 0 — it looks like it
- *   worked, but nothing moves). Every pane wtshunt opens lives in one tab,
- *   so `pane move` can never actually reorder them; an earlier version's
- *   silent failure to reorder panes was this. `herdr pane swap
- *   --source-pane <a> --target-pane <b>`, which exchanges two panes'
- *   positions within a tab, is the primitive confirmed to actually work —
- *   so instead of moving the new pane to its final spot in one call, it's
- *   walked there one swap at a time.
- *
- * The new pane's id comes straight from `agent start`'s own JSON response
- * (`result.agent.pane_id`) rather than diffing `pane list` before/after —
- * confirmed to always be present on success, and immune to a concurrent
- * pane appearing mid-call. If it's missing (unparseable stdout, or no
- * `pane_id`), placement control and tracking are both skipped entirely —
- * `agent start` itself already ran, so the pane exists somewhere, just
- * untracked.
- *
- * The anchor (`bubbleIntoPlace`'s `basePaneId`) is chosen from `order`
- * (this row's index in `wtshunt ui`'s list) against `openedPanes`, a map of
- * every order this adapter has placed so far to the pane it landed in: the
- * closest lower order's pane if one exists, else `wtshunt ui`'s own pane
- * (`HERDR_PANE_ID`) as the left edge. A row with no `order` (e.g. a
- * `toggle-proxy` open with no matching list row) is appended after the
- * highest order seen so far, or also anchored to the ui pane if nothing has
- * been placed yet. Before choosing it, a single `pane list` call drops any
- * previously-tracked pane no longer reported as live (the user closed it,
- * etc.) so it can never be picked as an anchor again — if `pane list`
- * itself fails, only that cleanup is skipped; placement still proceeds
- * against whatever `openedPanes` already held.
- *
- * A third pitfall, also confirmed by hands-on testing: `pane swap` moves
- * focus to its `--source-pane` as a side effect of swapping. `bubbleIntoPlace`
- * always calls it with the new pane as source, so a swap silently drags
- * focus off wherever the user actually was (e.g. `wtshunt ui`'s own pane) and
- * onto the pane that was just opened — reported by a user opening `api` then
- * `front`, where opening `front` moved focus there (one swap ran); an order
- * requiring zero swaps never showed the bug. Since a swap only *sometimes*
- * runs, focus is only *sometimes* disturbed, so it's only restored when
- * `bubbleIntoPlace` reports it actually swapped at least once — see
- * `restoreFocus`'s doc comment for how it walks focus back to `HERDR_PANE_ID`
- * (the ui pane). Left untouched when nothing swapped, or when
- * `HERDR_PANE_ID` isn't set (this `wtshunt ui` wasn't itself started from a
- * herdr pane, so there's nothing to walk back to).
+ * Either way, a failure to create the pane (nonzero exit, or a response
+ * missing the expected `pane_id`) is not swallowed: `herdrPaneSplit`/
+ * `herdrTabCreate` throw, so `wtshunt ui` surfaces the error instead of
+ * silently doing nothing. Without a pane there's nowhere for `serve`/
+ * `proxy` to run — unlike, say, a failed `pane rename`, which only costs a
+ * label and is swallowed instead (see `herdrPaneRename`).
  */
 export function herdrMux(options: HerdrMuxOptions = {}): Mux {
   const herdrBin = options.herdrBin ?? 'herdr';
@@ -431,31 +299,6 @@ export function herdrMux(options: HerdrMuxOptions = {}): Mux {
     name: 'herdr',
     detect: () => Boolean(process.env.HERDR_ENV || process.env.HERDR_SOCKET_PATH),
     async open({ title, command, cwd, order }) {
-      const args = ['agent', 'start', sanitizeLabel(title)];
-      if (cwd) {
-        args.push('--cwd', cwd);
-      }
-      args.push(...envForwardArgs('--env'));
-      const workspaceId = process.env.HERDR_WORKSPACE_ID;
-      if (workspaceId !== undefined) {
-        args.push('--workspace', workspaceId);
-      }
-      const tabId = process.env.HERDR_TAB_ID;
-      if (tabId !== undefined) {
-        args.push('--tab', tabId);
-      }
-      args.push('--split', 'right', '--no-focus', '--', 'sh', '-c', command);
-
-      const { stdout } = await execFileAsync(herdrBin, args);
-
-      const newPaneId = parseAgentStartPaneId(stdout);
-      if (newPaneId === undefined) {
-        // Can't tell which pane agent start just created — don't guess at
-        // placement or tracking. The pane stays wherever herdr placed it,
-        // untracked.
-        return;
-      }
-
       // Drop anything wtshunt placed previously that's no longer among the
       // live panes (the user closed it, etc.) so it never gets picked as an
       // anchor below. A `pane list` failure only skips this cleanup —
@@ -470,36 +313,29 @@ export function herdrMux(options: HerdrMuxOptions = {}): Mux {
         }
       }
 
-      let basePaneId: string | undefined;
+      let anchorPaneId: string | undefined;
       let bestOrder = -Infinity;
       for (const [ord, paneId] of openedPanes) {
         const qualifies = order !== undefined ? ord < order : true;
         if (qualifies && ord > bestOrder) {
           bestOrder = ord;
-          basePaneId = paneId;
+          anchorPaneId = paneId;
         }
       }
-      if (basePaneId === undefined) {
-        basePaneId = process.env.HERDR_PANE_ID;
+      if (anchorPaneId === undefined) {
+        anchorPaneId = process.env.HERDR_PANE_ID;
       }
 
-      let didSwap = false;
-      if (basePaneId !== undefined) {
-        didSwap = await bubbleIntoPlace(herdrBin, newPaneId, basePaneId);
-      }
+      const newPaneId =
+        anchorPaneId !== undefined
+          ? await herdrPaneSplit(herdrBin, anchorPaneId, cwd)
+          : await herdrTabCreate(herdrBin, cwd);
+
+      await herdrPaneRename(herdrBin, newPaneId, sanitizeLabel(title));
+      await herdrPaneRun(herdrBin, newPaneId, command);
 
       if (order !== undefined) {
         openedPanes.set(order, newPaneId);
-      }
-
-      // A swap moves focus to its source (the new pane) as a side effect —
-      // only restore it if bubbling actually swapped at least once, and only
-      // if there's a ui pane to walk focus back to.
-      if (didSwap) {
-        const uiPaneId = process.env.HERDR_PANE_ID;
-        if (uiPaneId !== undefined) {
-          await restoreFocus(herdrBin, uiPaneId);
-        }
       }
     },
   };
