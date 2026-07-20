@@ -441,6 +441,30 @@ Either way, the command run always references wtshunt's own resolved
 executable path directly, rather than a bare `wtshunt` that depends on
 `$PATH` being set up the same way in the new pane.
 
+## herdr plugin
+
+The repository doubles as a [herdr](https://herdr.dev) plugin
+(`herdr-plugin.toml`), so herdr users can summon `wtshunt ui` from any
+pane as a temporary overlay: switch a worktree, hit `q`, and focus
+returns to wherever you were.
+
+```sh
+herdr plugin install meganemura/wtshunt  # from GitHub (runs npm install)
+herdr plugin link /path/to/wtshunt       # or a local checkout (npm install yourself)
+```
+
+This registers the action `wtshunt.ui`. Try it once with
+`herdr plugin action invoke wtshunt.ui`, then bind it to a key in
+herdr's own `config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+w"
+type = "plugin_action"
+command = "wtshunt.ui"
+description = "wtshunt ui"
+```
+
 ## Tasks (experimental)
 
 Tasks are wtshunt's advanced multi-repo layer. Everything above works

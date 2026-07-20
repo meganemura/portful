@@ -350,6 +350,28 @@ zsh 用スクリプトは zsh の補完システムを自前で初期化しま�
 いずれの場合も、実行されるコマンドは常に wtshunt 自身の解決済み実行ファイルパスを直接参照します。
 新しいペインで `$PATH` が同じように設定されているとは限らないため、単に `wtshunt` と書く呼び出しには依存しません。
 
+## herdr プラグイン
+
+このリポジトリは [herdr](https://herdr.dev) のプラグイン(`herdr-plugin.toml`)を兼ねています。
+herdr 上なら、どのペインからでも `wtshunt ui` を一時的なオーバーレイとして呼び出せます。
+worktree を切り替えて `q` で閉じれば、フォーカスは元のペインに戻ります。
+
+```sh
+herdr plugin install meganemura/wtshunt  # GitHub から(npm install も実行されます)
+herdr plugin link /path/to/wtshunt       # ローカルのチェックアウトから(npm install は自分で)
+```
+
+これで `wtshunt.ui` というアクションが登録されます。
+まず `herdr plugin action invoke wtshunt.ui` で一度動きを確かめ、herdr 側の `config.toml` でキーに割り当ててください。
+
+```toml
+[[keys.command]]
+key = "prefix+w"
+type = "plugin_action"
+command = "wtshunt.ui"
+description = "wtshunt ui"
+```
+
 ## タスク (experimental)
 
 タスクは wtshunt の発展的な複数リポジトリ向けレイヤーで、ここまでの機能はタスク無しで完結します。

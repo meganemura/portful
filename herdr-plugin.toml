@@ -1,0 +1,26 @@
+id = "wtshunt"
+name = "wtshunt"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Open wtshunt ui as an overlay to switch git worktrees from anywhere"
+platforms = ["linux", "macos"]
+
+# Runs on `herdr plugin install` (GitHub installs); `herdr plugin link`
+# skips builds, so a linked checkout needs its own `npm install` first.
+[[build]]
+command = ["npm", "install"]
+
+[[panes]]
+id = "ui"
+title = "wtshunt ui"
+placement = "overlay"
+command = ["./bin/wtshunt.js", "ui"]
+
+# Keybinding target: herdr keys only support type = "plugin_action", so
+# this action exists to open the pane above. Bind it in herdr's
+# config.toml with command = "wtshunt.ui".
+[[actions]]
+id = "ui"
+title = "Open wtshunt ui"
+contexts = ["workspace"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "wtshunt", "--entrypoint", "ui", "--focus"]
