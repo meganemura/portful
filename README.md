@@ -465,6 +465,11 @@ command = "wtshunt.ui"
 description = "wtshunt ui"
 ```
 
+Opening `serve`/`proxy` from that overlay never splits whichever tab
+you were actually working in: they're collected into one dedicated
+`wtshunt` tab in the current workspace instead, created the first time
+it's needed.
+
 ## Tasks (experimental)
 
 Tasks are wtshunt's advanced multi-repo layer. Everything above works

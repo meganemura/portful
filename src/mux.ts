@@ -117,17 +117,65 @@ export function templateMux(template: string): Mux {
 }
 
 export interface HerdrMuxOptions {
-  /** Overrides the binary invoked for every herdr subcommand this adapter runs (`pane list`, `pane split`, `pane rename`, `pane run`, `tab create`) — for tests only, so the real `herdr` is never exercised. */
+  /** Overrides the binary invoked for every herdr subcommand this adapter runs (`pane list`, `pane split`, `pane rename`, `pane run`, `pane layout`, `tab list`, `tab create`) — for tests only, so the real `herdr` is never exercised. */
   herdrBin?: string;
 }
 
-/** One entry of `herdr pane list`'s `.result.panes[]`, as much of it as this module cares about. */
+/**
+ * One entry of `herdr pane list`'s `.result.panes[]`, as much of it as this
+ * module cares about. `tab_id` (confirmed present by hands-on testing) is
+ * only used by the plugin-mode dedicated-tab flow (see `herdrMux`'s doc
+ * comment) to tell which of the listed panes belong to the "wtshunt" tab;
+ * the ordinary flow ignores it.
+ */
 interface HerdrPane {
   pane_id: string;
+  tab_id?: string;
 }
 
 function isHerdrPane(value: unknown): value is HerdrPane {
-  return value !== null && typeof value === 'object' && typeof (value as { pane_id?: unknown }).pane_id === 'string';
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  const v = value as { pane_id?: unknown; tab_id?: unknown };
+  if (typeof v.pane_id !== 'string') {
+    return false;
+  }
+  return v.tab_id === undefined || typeof v.tab_id === 'string';
+}
+
+/** One entry of `herdr tab list`'s `.result.tabs[]`, as much of it as this module cares about. */
+interface HerdrTab {
+  tab_id: string;
+  label?: string;
+}
+
+function isHerdrTab(value: unknown): value is HerdrTab {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  const v = value as { tab_id?: unknown; label?: unknown };
+  if (typeof v.tab_id !== 'string') {
+    return false;
+  }
+  return v.label === undefined || typeof v.label === 'string';
+}
+
+/** One entry of `herdr pane layout`'s `.result.layout.panes[]`, as much of it as this module cares about. */
+interface HerdrLayoutPane {
+  pane_id: string;
+  rect: { x: number };
+}
+
+function isHerdrLayoutPane(value: unknown): value is HerdrLayoutPane {
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
+  const v = value as { pane_id?: unknown; rect?: unknown };
+  if (typeof v.pane_id !== 'string' || v.rect === null || typeof v.rect !== 'object') {
+    return false;
+  }
+  return typeof (v.rect as { x?: unknown }).x === 'number';
 }
 
 /**
@@ -150,6 +198,59 @@ async function herdrPaneList(herdrBin: string): Promise<HerdrPane[] | undefined>
     const parsed = JSON.parse(stdout) as { result?: { panes?: unknown } };
     const panes = parsed.result?.panes;
     return Array.isArray(panes) ? panes.filter(isHerdrPane) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Runs `herdr tab list --workspace <workspaceId>` and returns
+ * `.result.tabs[]`, or `undefined` if the command fails or its stdout
+ * doesn't parse as the expected shape (`{"result":{"tabs":[{"tab_id":...,
+ * "label":...}, ...]}}`, confirmed by hands-on testing). `undefined` here is
+ * the plugin-mode flow's own "can't be trusted" signal (see `herdrMux`'s doc
+ * comment): unlike `herdrPaneList`, whose failure only skips a cleanup step,
+ * a failed `tab list` makes the whole dedicated-tab flow fall back to the
+ * ordinary split-off-the-anchor flow instead — there'd be no reliable way to
+ * tell whether the "wtshunt" tab already exists.
+ */
+async function herdrTabList(herdrBin: string, workspaceId: string): Promise<HerdrTab[] | undefined> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(herdrBin, ['tab', 'list', '--workspace', workspaceId]));
+  } catch {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(stdout) as { result?: { tabs?: unknown } };
+    const tabs = parsed.result?.tabs;
+    return Array.isArray(tabs) ? tabs.filter(isHerdrTab) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Runs `herdr pane layout --pane <paneId>` and returns
+ * `.result.layout.panes[]` — confirmed by hands-on testing to be the full
+ * layout of whichever tab `paneId` belongs to (every pane in that tab, not
+ * just `paneId` itself), each entry carrying a `rect.x` that can be compared
+ * to find the leftmost one. Returns `undefined` on failure, same "skip this
+ * step" contract as `herdrPaneList`/`herdrTabList` — only used by the
+ * plugin-mode flow's fallback anchor lookup (`findAnchorInPluginTab`), which
+ * has its own further fallback for when this comes back `undefined`.
+ */
+async function herdrPaneLayout(herdrBin: string, paneId: string): Promise<HerdrLayoutPane[] | undefined> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(herdrBin, ['pane', 'layout', '--pane', paneId]));
+  } catch {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(stdout) as { result?: { layout?: { panes?: unknown } } };
+    const panes = parsed.result?.layout?.panes;
+    return Array.isArray(panes) ? panes.filter(isHerdrLayoutPane) : undefined;
   } catch {
     return undefined;
   }
@@ -189,16 +290,23 @@ async function herdrPaneSplit(herdrBin: string, anchorPaneId: string, cwd: strin
 /**
  * Fallback for when there's no anchor pane to split from at all (see
  * `herdrMux`'s doc comment). Runs `herdr tab create --workspace <id>
- * --cwd <cwd> --env K=V... --no-focus` (`--workspace` only when
- * `HERDR_WORKSPACE_ID` is set) and returns the new tab's root pane id, taken
- * from `.result.root_pane.pane_id`. Same throw-on-failure behavior as
- * `herdrPaneSplit`, for the same reason.
+ * [--label <label>] --cwd <cwd> --env K=V... --no-focus` (`--workspace`
+ * only when `HERDR_WORKSPACE_ID` is set; `--label` only when `label` is
+ * given — the ordinary flow never passes one, only the plugin-mode
+ * dedicated-tab flow does, to name it "wtshunt") and returns the new tab's
+ * root pane id, taken from `.result.root_pane.pane_id`. That root pane runs
+ * a plain shell (confirmed by hands-on testing), same as any other freshly
+ * split/created pane, so it's used exactly like one. Same throw-on-failure
+ * behavior as `herdrPaneSplit`, for the same reason.
  */
-async function herdrTabCreate(herdrBin: string, cwd: string | undefined): Promise<string> {
+async function herdrTabCreate(herdrBin: string, cwd: string | undefined, label?: string): Promise<string> {
   const args = ['tab', 'create'];
   const workspaceId = process.env.HERDR_WORKSPACE_ID;
   if (workspaceId !== undefined) {
     args.push('--workspace', workspaceId);
+  }
+  if (label !== undefined) {
+    args.push('--label', label);
   }
   if (cwd) {
     args.push('--cwd', cwd);
@@ -241,6 +349,161 @@ async function herdrPaneRename(herdrBin: string, paneId: string, label: string):
  */
 async function herdrPaneRun(herdrBin: string, paneId: string, command: string): Promise<void> {
   await execFileAsync(herdrBin, ['pane', 'run', paneId, command]);
+}
+
+/**
+ * The tracked pane whose order is the closest one below `order` (or, if
+ * `order` is `undefined`, the highest tracked order) — `undefined` if
+ * `openedPanes` holds nothing that qualifies. Shared by both `herdrMux`
+ * flows below: the ordinary split-off-the-last-pane flow anchors on this
+ * directly, and the plugin-mode dedicated-tab flow tries this first before
+ * falling back to `findAnchorInPluginTab`'s own leftmost-pane lookup.
+ */
+function pickTrackedAnchor(openedPanes: Map<number, string>, order: number | undefined): string | undefined {
+  let anchorPaneId: string | undefined;
+  let bestOrder = -Infinity;
+  for (const [ord, paneId] of openedPanes) {
+    const qualifies = order !== undefined ? ord < order : true;
+    if (qualifies && ord > bestOrder) {
+      bestOrder = ord;
+      anchorPaneId = paneId;
+    }
+  }
+  return anchorPaneId;
+}
+
+/**
+ * Drops any pane in `openedPanes` no longer reported as live by `pane list`
+ * (the user closed it, etc.) so it can never be picked as an anchor again.
+ * A `pane list` failure only skips this cleanup — `openedPanes` is left as
+ * whatever it already held. Returns the panes `pane list` reported (or
+ * `undefined` on failure) so a caller that also needs the full list (the
+ * plugin-mode flow's own-tab lookup) doesn't have to call it twice.
+ */
+async function cleanupTrackedPanes(herdrBin: string, openedPanes: Map<number, string>): Promise<HerdrPane[] | undefined> {
+  const panes = await herdrPaneList(herdrBin);
+  if (panes !== undefined) {
+    const currentIds = new Set(panes.map((p) => p.pane_id));
+    for (const [ord, paneId] of openedPanes) {
+      if (!currentIds.has(paneId)) {
+        openedPanes.delete(ord);
+      }
+    }
+  }
+  return panes;
+}
+
+/** Label the plugin-mode dedicated tab is created/looked up under (see `herdrMux`'s doc comment). */
+const PLUGIN_TAB_LABEL = 'wtshunt';
+
+/**
+ * Picks the anchor pane to split off when the plugin-mode dedicated
+ * "wtshunt" tab (`tabId`) already exists. Tries `pickTrackedAnchor` first —
+ * same rule as the ordinary flow, so a `wtshunt ui` session that has
+ * already placed panes in this tab keeps stacking them left-to-right by
+ * `order` exactly like it would outside plugin mode. Only when nothing
+ * qualifies there does it fall back to the tab's own leftmost pane: one
+ * pane belonging to `tabId` is picked out of `pane list`'s results, then
+ * `pane layout --pane <that pane>` (confirmed by hands-on testing to
+ * return the *whole* layout of whichever tab that pane belongs to, not
+ * just itself, each entry carrying a `rect.x`) finds the one with the
+ * smallest `rect.x`.
+ *
+ * If `pane layout` itself fails, this falls back further to simply
+ * whichever of the tab's panes `pane list` happened to report first — not
+ * necessarily the leftmost, so a `pane split` off it (which can only ever
+ * insert immediately right of its anchor, never left) lands the new pane
+ * second-from-left instead of first. That only happens when `pane layout`
+ * is already failing, so the occasional out-of-order pane in that
+ * degraded case is accepted rather than chased further.
+ *
+ * Returns `undefined` if `pane list` reports no live panes for `tabId` at
+ * all — a tab `tab list` just said exists but that, by the time this asks,
+ * has nothing left to split off (e.g. it was closed moments after `tab
+ * list` ran). The caller treats that the same as the tab never having
+ * existed and creates a fresh one.
+ */
+async function findAnchorInPluginTab(
+  herdrBin: string,
+  tabId: string,
+  openedPanes: Map<number, string>,
+  order: number | undefined
+): Promise<string | undefined> {
+  const panes = await cleanupTrackedPanes(herdrBin, openedPanes);
+
+  const tracked = pickTrackedAnchor(openedPanes, order);
+  if (tracked !== undefined) {
+    return tracked;
+  }
+
+  const tabPanes = (panes ?? []).filter((p) => p.tab_id === tabId);
+  if (tabPanes.length === 0) {
+    return undefined;
+  }
+
+  const layout = await herdrPaneLayout(herdrBin, tabPanes[0].pane_id);
+  if (layout !== undefined && layout.length > 0) {
+    return layout.reduce((leftmost, p) => (p.rect.x < leftmost.rect.x ? p : leftmost)).pane_id;
+  }
+  return tabPanes[0].pane_id;
+}
+
+/**
+ * Plugin-mode gate for `herdrMux.open()` (see `herdrMux`'s doc comment for
+ * why this whole flow exists). Returns `false` when the dedicated-tab
+ * bookkeeping can't be trusted — `HERDR_WORKSPACE_ID` isn't set, or `tab
+ * list` itself failed — so the caller falls through to the ordinary
+ * split-off-the-anchor flow exactly as if `HERDR_PLUGIN_ID` had never been
+ * set. Returns `true` once it has fully placed and started the pane
+ * (tracking it in `openedPanes` if `order` was given, same as the ordinary
+ * flow). Past the gate, failures propagate instead of triggering a
+ * fallback: `herdrPaneSplit`/`herdrTabCreate`/`herdrPaneRun` still throw on
+ * failure here for the same reason they do in the ordinary flow — a pane
+ * that can't be created or started leaves `wtshunt ui` with nothing useful
+ * to silently paper over.
+ */
+async function tryOpenInPluginTab(
+  herdrBin: string,
+  openedPanes: Map<number, string>,
+  { title, command, cwd, order }: MuxOpenOptions
+): Promise<boolean> {
+  const workspaceId = process.env.HERDR_WORKSPACE_ID;
+  if (workspaceId === undefined) {
+    return false;
+  }
+
+  const tabs = await herdrTabList(herdrBin, workspaceId);
+  if (tabs === undefined) {
+    return false;
+  }
+  const existingTab = tabs.find((t) => t.label === PLUGIN_TAB_LABEL);
+
+  let newPaneId: string;
+  if (existingTab === undefined) {
+    // No "wtshunt" tab yet — create it and use its root pane directly as
+    // the first pane placed in it. No `pane split` here: there's nothing to
+    // split off yet, and splitting the fresh tab's own root pane would just
+    // leave a spare idle shell pane behind alongside the one actually
+    // running `command`.
+    newPaneId = await herdrTabCreate(herdrBin, cwd, PLUGIN_TAB_LABEL);
+  } else {
+    const anchor = await findAnchorInPluginTab(herdrBin, existingTab.tab_id, openedPanes, order);
+    newPaneId =
+      anchor !== undefined
+        ? await herdrPaneSplit(herdrBin, anchor, cwd)
+        // The tab `tab list` reported turned out to have no live panes by
+        // the time `pane list` was asked — treat it the same as "no tab
+        // yet" rather than splitting off nothing.
+        : await herdrTabCreate(herdrBin, cwd, PLUGIN_TAB_LABEL);
+  }
+
+  await herdrPaneRename(herdrBin, newPaneId, sanitizeLabel(title));
+  await herdrPaneRun(herdrBin, newPaneId, `exec ${command}`);
+
+  if (order !== undefined) {
+    openedPanes.set(order, newPaneId);
+  }
+  return true;
 }
 
 /**
@@ -290,6 +553,29 @@ async function herdrPaneRun(herdrBin: string, paneId: string, command: string): 
  * silently doing nothing. Without a pane there's nowhere for `serve`/
  * `proxy` to run — unlike, say, a failed `pane rename`, which only costs a
  * label and is swallowed instead (see `herdrPaneRename`).
+ *
+ * **Plugin mode.** `wtshunt` also ships as a herdr plugin
+ * (`herdr-plugin.toml`) whose `ui` pane opens `wtshunt ui` as an `overlay`
+ * — a pane that floats over whichever tab the user was actually working
+ * in, rather than living inside it. Splitting off that overlay pane (i.e.
+ * off `HERDR_PANE_ID` as usual) would therefore insert the new `serve`/
+ * `proxy` pane into whatever tab happened to be underneath, confirmed by
+ * hands-on testing to really happen: opening `serve`/`proxy` from the
+ * overlay this way interrupts whatever the user was actually looking at,
+ * exactly the scenario this adapter exists to give panes a stable home
+ * outside of. So whenever this pane was started by herdr as a plugin
+ * entrypoint — detected via `HERDR_PLUGIN_ID` being set in the environment
+ * (herdr sets it, along with `HERDR_PLUGIN_ROOT`/
+ * `HERDR_PLUGIN_ENTRYPOINT_ID`, only for plugin-pane commands; it's unset
+ * for a `wtshunt ui` started directly in an ordinary pane) — `open()`
+ * instead routes through `tryOpenInPluginTab`, which collects every
+ * `serve`/`proxy` pane into one dedicated tab labeled "wtshunt" in the
+ * current workspace (`HERDR_WORKSPACE_ID`), creating that tab on first use,
+ * and never touches whichever tab the user is actually looking at. The
+ * ordinary flow below is unchanged and still what runs for a `wtshunt ui`
+ * started directly in a pane (no plugin involved), and is also what
+ * `tryOpenInPluginTab` itself falls back to when its own bookkeeping can't
+ * be trusted (see its doc comment).
  */
 export function herdrMux(options: HerdrMuxOptions = {}): Mux {
   const herdrBin = options.herdrBin ?? 'herdr';
@@ -299,32 +585,23 @@ export function herdrMux(options: HerdrMuxOptions = {}): Mux {
     name: 'herdr',
     detect: () => Boolean(process.env.HERDR_ENV || process.env.HERDR_SOCKET_PATH),
     async open({ title, command, cwd, order }) {
+      if (process.env.HERDR_PLUGIN_ID !== undefined) {
+        const handled = await tryOpenInPluginTab(herdrBin, openedPanes, { title, command, cwd, order });
+        if (handled) {
+          return;
+        }
+        // HERDR_WORKSPACE_ID wasn't set, or `tab list` itself failed —
+        // falls through to the ordinary flow below exactly as if
+        // HERDR_PLUGIN_ID had never been set.
+      }
+
       // Drop anything wtshunt placed previously that's no longer among the
       // live panes (the user closed it, etc.) so it never gets picked as an
       // anchor below. A `pane list` failure only skips this cleanup —
       // placement still proceeds against whatever `openedPanes` held.
-      const panes = await herdrPaneList(herdrBin);
-      if (panes !== undefined) {
-        const currentIds = new Set(panes.map((p) => p.pane_id));
-        for (const [ord, paneId] of openedPanes) {
-          if (!currentIds.has(paneId)) {
-            openedPanes.delete(ord);
-          }
-        }
-      }
+      await cleanupTrackedPanes(herdrBin, openedPanes);
 
-      let anchorPaneId: string | undefined;
-      let bestOrder = -Infinity;
-      for (const [ord, paneId] of openedPanes) {
-        const qualifies = order !== undefined ? ord < order : true;
-        if (qualifies && ord > bestOrder) {
-          bestOrder = ord;
-          anchorPaneId = paneId;
-        }
-      }
-      if (anchorPaneId === undefined) {
-        anchorPaneId = process.env.HERDR_PANE_ID;
-      }
+      const anchorPaneId = pickTrackedAnchor(openedPanes, order) ?? process.env.HERDR_PANE_ID;
 
       const newPaneId =
         anchorPaneId !== undefined

@@ -221,36 +221,49 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
  * Stands in for the real `herdr` binary in the `herdrMux.open()` tests
  * below (which — unlike the `.detect()` test above — do exercise `.open()`,
  * but only ever against this stand-in, never the real `herdr`). Understands
- * just enough of `pane list`/`pane split`/`pane rename`/`pane run`/
- * `tab create` to drive `herdrMux`'s anchor-selection and pane-creation
- * logic. Every invocation is logged (via `$STUB_LOG`, one JSON line per
- * call) before dispatching on its subcommand, including one that matches
- * none of the branches below — which falls through to `process.exit(1)`,
- * so `agent start`/`pane neighbor`/`pane swap`/`pane layout`/`pane focus`
- * (the old `agent start` + swap-bubbling machinery this adapter no longer
- * uses) are all deliberately unimplemented: were `herdrMux` to ever call
- * one by mistake, that call would both show up in the log and make the
- * stub reject loudly instead of silently succeeding.
+ * just enough of `pane list`/`pane split`/`pane rename`/`pane run`/`pane
+ * layout`/`tab list`/`tab create` to drive `herdrMux`'s anchor-selection,
+ * pane-creation, and plugin-mode dedicated-tab logic. Every invocation is
+ * logged (via `$STUB_LOG`, one JSON line per call) before dispatching on its
+ * subcommand, including one that matches none of the branches below — which
+ * falls through to `process.exit(1)`, so `agent start`/`pane neighbor`/
+ * `pane swap`/`pane focus` (the old `agent start` + swap-bubbling machinery
+ * this adapter no longer uses) are all deliberately unimplemented: were
+ * `herdrMux` to ever call one by mistake, that call would both show up in
+ * the log and make the stub reject loudly instead of silently succeeding.
  *
  * - `pane list` prints `{"result":{"panes":[...state...]}}` (state read
- *   from `$STUB_STATE`, a JSON array of `{pane_id}`), or exits 1 if
+ *   from `$STUB_STATE`, a JSON array of `{pane_id, tab_id?}`), or exits 1 if
  *   `$STUB_PANE_LIST_FAIL` is set.
+ * - `tab list --workspace <id>` prints `{"result":{"tabs":[...state...]}}`
+ *   (state read from `$STUB_TABS_STATE`, a JSON array of
+ *   `{tab_id, label?}`), or exits 1 if `$STUB_TABLIST_FAIL` is set.
+ * - `pane layout --pane <id>` prints
+ *   `{"result":{"layout":{"panes":[...state...]}}}` (state read from
+ *   `$STUB_LAYOUT_STATE`, a JSON array of `{pane_id, rect:{x}}`, the same
+ *   for every `--pane` value — tests only ever need one tab's layout at a
+ *   time), or exits 1 if `$STUB_LAYOUT_FAIL` is set.
  * - `pane split --pane <id> --direction right --no-focus [--cwd ...]
  *   [--env ...]` either echoes back `$STUB_SPLIT_STDOUT` verbatim (for
  *   simulating a malformed response) or, if `$STUB_NEXT_PANE_ID` is set,
  *   responds with `{"result":{"pane":{"pane_id":$STUB_NEXT_PANE_ID}}}` and
  *   records that pane as newly created in the state file (so a later `pane
- *   list` reports it) — or otherwise `{"result":{"pane":{}}}` (no
+ *   list` reports it), inheriting the anchor pane's `tab_id` if the anchor
+ *   is itself a known pane — or otherwise `{"result":{"pane":{}}}` (no
  *   `pane_id`). Exits with `$STUB_SPLIT_EXIT` (default 0).
- * - `tab create [--workspace ...] [--cwd ...] [--env ...] --no-focus`
- *   mirrors `pane split` exactly, except the response field is
- *   `result.root_pane` instead of `result.pane`, and its stdout/exit code
- *   are controlled by `$STUB_TABCREATE_STDOUT`/`$STUB_TABCREATE_EXIT`.
+ * - `tab create [--workspace ...] [--label ...] [--cwd ...] [--env ...]
+ *   --no-focus` mirrors `pane split` exactly (response field
+ *   `result.root_pane` instead of `result.pane`, stdout/exit code from
+ *   `$STUB_TABCREATE_STDOUT`/`$STUB_TABCREATE_EXIT`), except the new pane's
+ *   `tab_id` comes from `$STUB_NEXT_TAB_ID` (only recorded — along with a
+ *   new tab entry in `$STUB_TABS_STATE`, carrying `--label`'s value if
+ *   given — when that var is set, so tests that don't care about `tab list`
+ *   afterward can skip it).
  * - `pane rename <id> <label>` exits with `$STUB_RENAME_EXIT` (default 0).
  * - `pane run <id> <command>` exits with `$STUB_RUN_EXIT` (default 0).
  *
  * Tests drive scenarios by setting these env vars before each `open()` call
- * and by rewriting the state file directly (e.g. to simulate the user
+ * and by rewriting the state files directly (e.g. to simulate the user
  * closing a pane between two `open()` calls).
  */
 async function writeHerdrStub(dir: string): Promise<string> {
@@ -263,33 +276,38 @@ if (process.env.STUB_LOG) {
   fs.appendFileSync(process.env.STUB_LOG, JSON.stringify({ argv }) + '\\n');
 }
 
-function readState() {
-  if (!process.env.STUB_STATE) {
+function readJsonState(envVar) {
+  if (!process.env[envVar]) {
     return [];
   }
   try {
-    return JSON.parse(fs.readFileSync(process.env.STUB_STATE, 'utf8'));
+    return JSON.parse(fs.readFileSync(process.env[envVar], 'utf8'));
   } catch {
     return [];
   }
 }
 
-function writeState(panes) {
-  if (process.env.STUB_STATE) {
-    fs.writeFileSync(process.env.STUB_STATE, JSON.stringify(panes));
+function writeJsonState(envVar, value) {
+  if (process.env[envVar]) {
+    fs.writeFileSync(process.env[envVar], JSON.stringify(value));
   }
 }
 
-function respondWithNewPane(resultKey, stdoutEnvVar, exitEnvVar) {
+function flagValue(flag) {
+  const i = argv.indexOf(flag);
+  return i === -1 ? undefined : argv[i + 1];
+}
+
+function respondWithNewPane(resultKey, stdoutEnvVar, exitEnvVar, tabId) {
   if (process.env[stdoutEnvVar] !== undefined) {
     process.stdout.write(process.env[stdoutEnvVar]);
     process.exit(Number(process.env[exitEnvVar] ?? '0'));
   }
   const newPaneId = process.env.STUB_NEXT_PANE_ID;
   if (newPaneId) {
-    const panes = readState();
-    panes.push({ pane_id: newPaneId });
-    writeState(panes);
+    const panes = readJsonState('STUB_STATE');
+    panes.push(tabId ? { pane_id: newPaneId, tab_id: tabId } : { pane_id: newPaneId });
+    writeJsonState('STUB_STATE', panes);
     process.stdout.write(JSON.stringify({ result: { [resultKey]: { pane_id: newPaneId } } }));
   } else {
     process.stdout.write(JSON.stringify({ result: { [resultKey]: {} } }));
@@ -301,16 +319,41 @@ if (argv[0] === 'pane' && argv[1] === 'list') {
   if (process.env.STUB_PANE_LIST_FAIL === '1') {
     process.exit(1);
   }
-  process.stdout.write(JSON.stringify({ result: { panes: readState() } }));
+  process.stdout.write(JSON.stringify({ result: { panes: readJsonState('STUB_STATE') } }));
+  process.exit(0);
+}
+
+if (argv[0] === 'tab' && argv[1] === 'list') {
+  if (process.env.STUB_TABLIST_FAIL === '1') {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify({ result: { tabs: readJsonState('STUB_TABS_STATE') } }));
+  process.exit(0);
+}
+
+if (argv[0] === 'pane' && argv[1] === 'layout') {
+  if (process.env.STUB_LAYOUT_FAIL === '1') {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify({ result: { layout: { panes: readJsonState('STUB_LAYOUT_STATE') } } }));
   process.exit(0);
 }
 
 if (argv[0] === 'pane' && argv[1] === 'split') {
-  respondWithNewPane('pane', 'STUB_SPLIT_STDOUT', 'STUB_SPLIT_EXIT');
+  const anchorId = flagValue('--pane');
+  const anchorPane = readJsonState('STUB_STATE').find((p) => p.pane_id === anchorId);
+  respondWithNewPane('pane', 'STUB_SPLIT_STDOUT', 'STUB_SPLIT_EXIT', anchorPane && anchorPane.tab_id);
 }
 
 if (argv[0] === 'tab' && argv[1] === 'create') {
-  respondWithNewPane('root_pane', 'STUB_TABCREATE_STDOUT', 'STUB_TABCREATE_EXIT');
+  const newTabId = process.env.STUB_NEXT_TAB_ID;
+  if (newTabId && process.env.STUB_TABCREATE_STDOUT === undefined && process.env.STUB_NEXT_PANE_ID) {
+    const tabs = readJsonState('STUB_TABS_STATE');
+    const label = flagValue('--label');
+    tabs.push(label ? { tab_id: newTabId, label } : { tab_id: newTabId });
+    writeJsonState('STUB_TABS_STATE', tabs);
+  }
+  respondWithNewPane('root_pane', 'STUB_TABCREATE_STDOUT', 'STUB_TABCREATE_EXIT', newTabId);
 }
 
 if (argv[0] === 'pane' && argv[1] === 'rename') {
@@ -368,11 +411,15 @@ const paneArgOf = (call: StubCall): string | undefined => flagValue(call, '--pan
 const HERDR_OPEN_TEST_ENV_KEYS = [
   'HERDR_PANE_ID',
   'HERDR_WORKSPACE_ID',
+  'HERDR_PLUGIN_ID',
   'XDG_CONFIG_HOME',
   'XDG_STATE_HOME',
   'STUB_LOG',
   'STUB_STATE',
+  'STUB_TABS_STATE',
+  'STUB_LAYOUT_STATE',
   'STUB_NEXT_PANE_ID',
+  'STUB_NEXT_TAB_ID',
   'STUB_SPLIT_EXIT',
   'STUB_SPLIT_STDOUT',
   'STUB_TABCREATE_EXIT',
@@ -380,6 +427,8 @@ const HERDR_OPEN_TEST_ENV_KEYS = [
   'STUB_RENAME_EXIT',
   'STUB_RUN_EXIT',
   'STUB_PANE_LIST_FAIL',
+  'STUB_TABLIST_FAIL',
+  'STUB_LAYOUT_FAIL',
 ] as const;
 
 type HerdrOpenTestEnv = Partial<Record<(typeof HERDR_OPEN_TEST_ENV_KEYS)[number], string>>;
@@ -402,15 +451,32 @@ function restoreHerdrOpenTestEnv(saved: HerdrOpenTestEnv): void {
   }
 }
 
-/** Sets up a fresh stub binary, log file, and empty pane-list state; returns everything a test needs to drive `herdrMux.open()`. */
-async function setUpHerdrOpenTest(dir: string): Promise<{ herdrBin: string; logFile: string; stateFile: string }> {
+/**
+ * Sets up a fresh stub binary, log file, and empty pane-list/tab-list/layout
+ * state; returns everything a test needs to drive `herdrMux.open()`. Also
+ * clears `HERDR_PLUGIN_ID` — this dev environment can genuinely be a live
+ * herdr session (`HERDR_ENV`/`HERDR_PANE_ID`/`HERDR_WORKSPACE_ID` really are
+ * set), but never as a plugin pane, so this is just future-proofing to keep
+ * every non-plugin-mode test on the ordinary flow regardless; plugin-mode
+ * tests set `HERDR_PLUGIN_ID` themselves afterward.
+ */
+async function setUpHerdrOpenTest(
+  dir: string
+): Promise<{ herdrBin: string; logFile: string; stateFile: string; tabsStateFile: string; layoutStateFile: string }> {
   const herdrBin = await writeHerdrStub(dir);
   const logFile = join(dir, 'log.jsonl');
   const stateFile = join(dir, 'state.json');
+  const tabsStateFile = join(dir, 'tabs-state.json');
+  const layoutStateFile = join(dir, 'layout-state.json');
   await writeFile(stateFile, '[]');
+  await writeFile(tabsStateFile, '[]');
+  await writeFile(layoutStateFile, '[]');
   process.env.STUB_LOG = logFile;
   process.env.STUB_STATE = stateFile;
-  return { herdrBin, logFile, stateFile };
+  process.env.STUB_TABS_STATE = tabsStateFile;
+  process.env.STUB_LAYOUT_STATE = layoutStateFile;
+  delete process.env.HERDR_PLUGIN_ID;
+  return { herdrBin, logFile, stateFile, tabsStateFile, layoutStateFile };
 }
 
 test('herdrMux.open: (a) a first open with order splits off HERDR_PANE_ID, forwarding --cwd and XDG_* via --env, then renames and runs the command verbatim', async () => {
@@ -706,6 +772,281 @@ test('herdrMux.open: when pane list fails, only its cleanup is skipped — pane 
   }
 });
 
+// --- Plugin mode: HERDR_PLUGIN_ID set, dedicated "wtshunt" tab flow. ---
+//
+// wtshunt ships as a herdr plugin whose `ui` pane is an `overlay` — it
+// floats over whichever tab the user was actually working in rather than
+// living inside it, so splitting off it (HERDR_PANE_ID, used above) would
+// insert serve/proxy panes into that tab instead. These tests drive
+// `herdrMux.open()` with `HERDR_PLUGIN_ID` set (confirmed by hands-on
+// testing to be how herdr marks a plugin-pane command) to exercise the
+// dedicated-tab flow that avoids that.
+
+test('herdrMux.open (plugin mode): creates a dedicated "wtshunt" tab when none exists yet, then renames and runs its root pane directly (no split)', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_WORKSPACE_ID = 'w1';
+    process.env.HERDR_PANE_ID = 'overlay-pane'; // wtshunt ui's own overlay pane — must never be split off
+    process.env.STUB_NEXT_PANE_ID = 'w1:p9';
+    process.env.XDG_CONFIG_HOME = '/tmp/wtshunt-test-config';
+    process.env.XDG_STATE_HOME = '/tmp/wtshunt-test-state';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'api/feature-x', command: 'echo hi', cwd: '/tmp', order: 0 });
+
+    const calls = await readStubLog(logFile);
+    assert.deepEqual(
+      calls.map((c) => `${c.argv[0]} ${c.argv[1]}`),
+      ['tab list', 'tab create', 'pane rename', 'pane run'],
+      'no pane list/split — the tab is created fresh and its root pane used directly'
+    );
+
+    assert.deepEqual(calls[0].argv, ['tab', 'list', '--workspace', 'w1']);
+
+    const tabCreate = calls[1];
+    assert.equal(workspaceOf(tabCreate), 'w1');
+    assert.equal(flagValue(tabCreate, '--label'), 'wtshunt');
+    assert.ok(tabCreate.argv.includes('--no-focus'));
+    assert.equal(flagValue(tabCreate, '--cwd'), '/tmp');
+    assert.deepEqual(flagValues(tabCreate, '--env'), [
+      'XDG_CONFIG_HOME=/tmp/wtshunt-test-config',
+      'XDG_STATE_HOME=/tmp/wtshunt-test-state',
+    ]);
+
+    const rename = calls[2];
+    assert.deepEqual(rename.argv, ['pane', 'rename', 'w1:p9', 'api/feature-x']);
+
+    const run = calls[3];
+    assert.deepEqual(run.argv, ['pane', 'run', 'w1:p9', 'exec echo hi']);
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("herdrMux.open (plugin mode): once the tab exists, a tracked pane with a lower order anchors the split, and pane layout is never consulted", async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_WORKSPACE_ID = 'w1';
+    process.env.HERDR_PANE_ID = 'overlay-pane';
+
+    const mux = herdrMux({ herdrBin });
+
+    // First open creates the "wtshunt" tab (STUB_NEXT_TAB_ID makes the stub
+    // record it, so the next `tab list` call reports it as already there).
+    process.env.STUB_NEXT_TAB_ID = 'w1:t9';
+    process.env.STUB_NEXT_PANE_ID = 'w1:p9';
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    process.env.STUB_NEXT_PANE_ID = 'w1:p10';
+    await mux.open({ title: 'second', command: 'echo 2', order: 5 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'tab', 'list').length, 2, 'checked again on the second open');
+    assert.equal(callsMatching(calls, 'tab', 'create').length, 1, 'only the first open needed to create the tab');
+
+    const splits = callsMatching(calls, 'pane', 'split');
+    assert.equal(splits.length, 1);
+    assert.equal(paneArgOf(splits[0]), 'w1:p9', "order 5 anchors on order 0's tracked pane");
+    assert.equal(callsMatching(calls, 'pane', 'layout').length, 0, 'a tracked anchor short-circuits the leftmost-pane lookup');
+    assert.ok(!calls.some((c) => paneArgOf(c) === 'overlay-pane'), 'the overlay pane itself is never used as an anchor');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("herdrMux.open (plugin mode): with no tracked anchor, finds the wtshunt tab's leftmost pane via pane layout", async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, stateFile, tabsStateFile, layoutStateFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_WORKSPACE_ID = 'w1';
+    process.env.HERDR_PANE_ID = 'overlay-pane';
+
+    // A "wtshunt" tab already exists (from an earlier wtshunt ui session,
+    // say) with two panes in it, but this fresh herdrMux() instance has
+    // nothing tracked in memory for it yet.
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    await writeFile(
+      stateFile,
+      JSON.stringify([
+        { pane_id: 'w1:p1', tab_id: 'w1:t9' },
+        { pane_id: 'w1:p2', tab_id: 'w1:t9' },
+      ])
+    );
+    await writeFile(
+      layoutStateFile,
+      JSON.stringify([
+        { pane_id: 'w1:p1', rect: { x: 40 } },
+        { pane_id: 'w1:p2', rect: { x: 0 } },
+      ])
+    );
+    process.env.STUB_NEXT_PANE_ID = 'w1:p3';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'third', command: 'echo 3' });
+
+    const calls = await readStubLog(logFile);
+    const layoutCalls = callsMatching(calls, 'pane', 'layout');
+    assert.equal(layoutCalls.length, 1);
+    assert.equal(paneArgOf(layoutCalls[0]), 'w1:p1', 'layout is queried off whichever tab pane pane list reported first');
+
+    const splits = callsMatching(calls, 'pane', 'split');
+    assert.equal(splits.length, 1);
+    assert.equal(paneArgOf(splits[0]), 'w1:p2', 'the pane with the smallest rect.x is chosen as the anchor');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open (plugin mode): a "wtshunt" tab with zero live panes is treated the same as no tab at all', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, tabsStateFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_WORKSPACE_ID = 'w1';
+    process.env.HERDR_PANE_ID = 'overlay-pane';
+
+    // `tab list` reports a "wtshunt" tab, but `pane list` (left at its
+    // default empty state) has nothing belonging to it — e.g. it was closed
+    // moments after `tab list` ran.
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1' });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'split').length, 0, 'no anchor pane existed, so a fresh tab is created instead');
+    const tabCreates = callsMatching(calls, 'tab', 'create');
+    assert.equal(tabCreates.length, 1);
+    assert.equal(flagValue(tabCreates[0], '--label'), 'wtshunt');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open (plugin mode): if pane layout fails, falls back to the first pane pane list reported for the tab', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile, stateFile, tabsStateFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_WORKSPACE_ID = 'w1';
+    process.env.HERDR_PANE_ID = 'overlay-pane';
+    process.env.STUB_LAYOUT_FAIL = '1';
+
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    await writeFile(
+      stateFile,
+      JSON.stringify([
+        { pane_id: 'w1:p1', tab_id: 'w1:t9' },
+        { pane_id: 'w1:p2', tab_id: 'w1:t9' },
+      ])
+    );
+    process.env.STUB_NEXT_PANE_ID = 'w1:p3';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1' });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'pane', 'layout').length, 1, 'still attempted, even though it fails');
+    const splits = callsMatching(calls, 'pane', 'split');
+    assert.equal(splits.length, 1);
+    assert.equal(
+      paneArgOf(splits[0]),
+      'w1:p1',
+      "falls back to pane list's first reported pane for the tab, not necessarily the leftmost"
+    );
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open: without HERDR_PLUGIN_ID, the plugin dedicated-tab flow never runs even if HERDR_WORKSPACE_ID is set', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PANE_ID = 'w1:p1';
+    process.env.HERDR_WORKSPACE_ID = 'w1'; // set, but HERDR_PLUGIN_ID is not — must not matter
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'tab', 'list').length, 0, 'the plugin gate is never even entered');
+    const splits = callsMatching(calls, 'pane', 'split');
+    assert.equal(splits.length, 1);
+    assert.equal(paneArgOf(splits[0]), 'w1:p1', 'ordinary flow still splits off HERDR_PANE_ID');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open (plugin mode): falls back to the ordinary flow when HERDR_WORKSPACE_ID is unset', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    delete process.env.HERDR_WORKSPACE_ID;
+    process.env.HERDR_PANE_ID = 'overlay-pane';
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'tab', 'list').length, 0, 'never even attempted without a workspace id');
+    const splits = callsMatching(calls, 'pane', 'split');
+    assert.equal(splits.length, 1);
+    assert.equal(paneArgOf(splits[0]), 'overlay-pane', 'falls back to splitting off HERDR_PANE_ID, same as non-plugin mode');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('herdrMux.open (plugin mode): falls back to the ordinary flow when tab list fails', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const saved = saveHerdrOpenTestEnv();
+  try {
+    const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
+    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_WORKSPACE_ID = 'w1';
+    process.env.HERDR_PANE_ID = 'overlay-pane';
+    process.env.STUB_TABLIST_FAIL = '1';
+    process.env.STUB_NEXT_PANE_ID = 'w1:p2';
+
+    const mux = herdrMux({ herdrBin });
+    await mux.open({ title: 'first', command: 'echo 1', order: 0 });
+
+    const calls = await readStubLog(logFile);
+    assert.equal(callsMatching(calls, 'tab', 'list').length, 1, 'attempted, even though it fails');
+    assert.equal(callsMatching(calls, 'tab', 'create').length, 0, 'no plugin-tab creation attempted after the failure');
+    const splits = callsMatching(calls, 'pane', 'split');
+    assert.equal(splits.length, 1);
+    assert.equal(paneArgOf(splits[0]), 'overlay-pane', 'falls back to splitting off HERDR_PANE_ID');
+  } finally {
+    restoreHerdrOpenTestEnv(saved);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test('cmuxArgs: builds new-workspace with --name/--cwd/--command and --focus false', () => {
   assert.deepEqual(cmuxArgs({ title: 'api/feature-x', command: 'echo hi', cwd: '/tmp/x' }), [
