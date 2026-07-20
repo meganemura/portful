@@ -332,7 +332,12 @@ export function herdrMux(options: HerdrMuxOptions = {}): Mux {
           : await herdrTabCreate(herdrBin, cwd);
 
       await herdrPaneRename(herdrBin, newPaneId, sanitizeLabel(title));
-      await herdrPaneRun(herdrBin, newPaneId, command);
+      // `exec` replaces the pane's shell with the command, so the pane
+      // closes when the server exits (confirmed by hands-on testing) instead
+      // of dropping back to an idle shell that piles up across restarts.
+      // This matches every other adapter, where the command *is* the pane's
+      // root process.
+      await herdrPaneRun(herdrBin, newPaneId, `exec ${command}`);
 
       if (order !== undefined) {
         openedPanes.set(order, newPaneId);

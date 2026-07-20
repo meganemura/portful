@@ -447,7 +447,7 @@ test('herdrMux.open: (a) a first open with order splits off HERDR_PANE_ID, forwa
     assert.deepEqual(rename.argv, ['pane', 'rename', 'w1:p2', 'api/feature-x']);
 
     const run = calls[3];
-    assert.deepEqual(run.argv, ['pane', 'run', 'w1:p2', 'echo hi'], 'the command string is passed through unmodified');
+    assert.deepEqual(run.argv, ['pane', 'run', 'w1:p2', 'exec echo hi'], 'the command runs via exec so the pane closes when it exits');
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
@@ -618,7 +618,7 @@ test('herdrMux.open: a nonzero-exit or pane_id-less tab create response also mak
   }
 });
 
-test('herdrMux.open: (g) a failed pane rename is ignored, and pane run still runs with the exact command string', async () => {
+test('herdrMux.open: (g) a failed pane rename is ignored, and pane run still runs the exec-wrapped command', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
@@ -628,13 +628,13 @@ test('herdrMux.open: (g) a failed pane rename is ignored, and pane run still run
     process.env.STUB_RENAME_EXIT = '1';
 
     const mux = herdrMux({ herdrBin });
-    await mux.open({ title: 'first', command: 'echo hi && echo there', order: 0 });
+    await mux.open({ title: 'first', command: 'echo hi', order: 0 });
 
     const calls = await readStubLog(logFile);
     assert.equal(callsMatching(calls, 'pane', 'rename').length, 1, 'rename was attempted despite always failing');
     const runs = callsMatching(calls, 'pane', 'run');
     assert.equal(runs.length, 1, 'run still reached rename\'s failure notwithstanding');
-    assert.deepEqual(runs[0].argv, ['pane', 'run', 'w1:p2', 'echo hi && echo there']);
+    assert.deepEqual(runs[0].argv, ['pane', 'run', 'w1:p2', 'exec echo hi']);
   } finally {
     restoreHerdrOpenTestEnv(saved);
     await rm(dir, { recursive: true, force: true });
