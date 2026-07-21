@@ -1,5 +1,14 @@
-import { connect } from 'node:net';
-import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { connect as netConnect } from 'node:net';
+import {
+  createServer as createHttpServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from 'node:http';
+import { createServer as createHttpsServer, request as httpsRequest, type Server as HttpsServer } from 'node:https';
+import { connect as tlsConnect } from 'node:tls';
 import type { Duplex } from 'node:stream';
 import type { RepoConfig } from './config.ts';
 import { readState, type ServerEntry } from './state.ts';
@@ -17,15 +26,36 @@ export interface ProxyHandle {
 
 export async function startProxy(options: StartProxyOptions): Promise<ProxyHandle> {
   const { repoName, repoConfig } = options;
+  const tlsConfig = repoConfig.https;
+  const usesTls = Boolean(tlsConfig?.cert && tlsConfig?.key);
+  const usesHttpsBackend = Boolean(tlsConfig?.backend);
 
-  const server: Server = createServer((req, res) => {
-    void handleRequest(repoName, req, res);
-  });
+  const requestListener = (req: IncomingMessage, res: ServerResponse) => {
+    void handleRequest(repoName, req, res, usesTls, usesHttpsBackend);
+  };
+
+  let server: HttpServer | HttpsServer;
+  if (usesTls) {
+    // Cert/key content is only read once the proxy actually starts (not at
+    // config-load time, which only checks the paths exist), so a cert that
+    // was deleted or made unreadable in the meantime surfaces here.
+    let cert: Buffer;
+    let key: Buffer;
+    try {
+      cert = readFileSync(tlsConfig!.cert!);
+      key = readFileSync(tlsConfig!.key!);
+    } catch (err) {
+      throw new Error(`Failed to read TLS cert/key for repo "${repoName}": ${(err as Error).message}`);
+    }
+    server = createHttpsServer({ cert, key }, requestListener);
+  } else {
+    server = createHttpServer(requestListener);
+  }
 
   // WebSocket / other Upgrade requests (ActionCable, Vite/webpack HMR, ...)
   // arrive as a separate event, not as a normal request/response pair.
   server.on('upgrade', (req, socket, head) => {
-    void handleUpgrade(repoName, req, socket, head);
+    void handleUpgrade(repoName, req, socket, head, usesHttpsBackend);
   });
 
   await new Promise<void>((resolvePromise, reject) => {
@@ -83,7 +113,13 @@ async function resolveActiveServer(repoName: string): Promise<ActiveServerLookup
   return { ok: true, activeName, entry };
 }
 
-async function handleRequest(repoName: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleRequest(
+  repoName: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+  usesTls: boolean,
+  usesHttpsBackend: boolean
+): Promise<void> {
   const lookup = await resolveActiveServer(repoName);
   if (!lookup.ok) {
     send502(res, lookup.activeName, lookup.message);
@@ -91,20 +127,40 @@ async function handleRequest(repoName: string, req: IncomingMessage, res: Server
   }
   const { activeName, entry } = lookup;
 
-  const proxyReq = httpRequest(
-    {
-      host: '127.0.0.1',
-      port: entry.port,
-      method: req.method,
-      path: req.url,
-      headers: req.headers,
-    },
-    (proxyRes) => {
-      res.setHeader('X-Wtshunt-Worktree', activeName);
-      res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
-      proxyRes.pipe(res);
-    }
-  );
+  // Only stamped when the proxy itself is terminating TLS; a plain-http
+  // listener forwards headers unchanged, exactly as before this feature.
+  const headers = usesTls ? { ...req.headers, 'x-forwarded-proto': 'https' } : req.headers;
+
+  const onProxyResponse = (proxyRes: IncomingMessage) => {
+    res.setHeader('X-Wtshunt-Worktree', activeName);
+    res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+    proxyRes.pipe(res);
+  };
+
+  const proxyReq = usesHttpsBackend
+    ? httpsRequest(
+        {
+          host: '127.0.0.1',
+          port: entry.port,
+          method: req.method,
+          path: req.url,
+          headers,
+          // mkcert's local CA isn't in Node's trust store, and for loopback
+          // dev traffic verifying it isn't worth the friction: skip it.
+          rejectUnauthorized: false,
+        },
+        onProxyResponse
+      )
+    : httpRequest(
+        {
+          host: '127.0.0.1',
+          port: entry.port,
+          method: req.method,
+          path: req.url,
+          headers,
+        },
+        onProxyResponse
+      );
 
   proxyReq.on('error', () => {
     send502(
@@ -136,7 +192,13 @@ function send502(res: ServerResponse, worktree: string | undefined, message: str
  * that would require parsing and rewriting the raw handshake response for a
  * benefit that doesn't justify the complexity.
  */
-async function handleUpgrade(repoName: string, req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+async function handleUpgrade(
+  repoName: string,
+  req: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  usesHttpsBackend: boolean
+): Promise<void> {
   const lookup = await resolveActiveServer(repoName);
   if (!lookup.ok) {
     sendRawBadGateway(socket, lookup.message);
@@ -144,7 +206,11 @@ async function handleUpgrade(repoName: string, req: IncomingMessage, socket: Dup
   }
   const { activeName, entry } = lookup;
 
-  const upstream = connect(entry.port, '127.0.0.1');
+  // Same rejectUnauthorized: false rationale as the plain-request path above:
+  // mkcert's CA isn't trusted by Node, and this tunnel never leaves loopback.
+  const upstream = usesHttpsBackend
+    ? tlsConnect({ port: entry.port, host: '127.0.0.1', rejectUnauthorized: false })
+    : netConnect(entry.port, '127.0.0.1');
   let connected = false;
   let torndown = false;
 

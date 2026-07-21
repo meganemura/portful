@@ -144,6 +144,30 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
   `port_range` (including its own). Each of these fails config loading
   immediately, naming the repos involved.
 
+Each repo can also have an optional `[repos.<name>.https]` table, for
+worktree servers that already run with a mkcert (or similar) certificate:
+
+```toml
+[repos.api.https]
+cert = "~/certs/localhost.pem"      # TLS-terminate fixed_port with this pair
+key = "~/certs/localhost-key.pem"
+backend = true                       # forward to the worktree server over https too
+```
+
+- `cert`/`key` TLS-terminate the fixed-port listener itself. A mkcert-issued
+  pair for `localhost`/`127.0.0.1` can usually be pointed at directly, since
+  it's the same certificate the worktree servers already trust. They must be
+  set together, or both left out entirely; either path not existing or not
+  being readable fails config loading immediately, and both paths support
+  `~` expansion the same way `path` does.
+- `backend` (default `false`) makes the proxy talk to the worktree's own
+  server over https instead of http, for setups where the backend itself
+  terminates TLS. It's independent of `cert`/`key`: a plain-http listener
+  can forward to an https backend, and a TLS-terminating listener can
+  forward to a plain-http backend, in any combination.
+- With no `[repos.<name>.https]` table at all, the proxy behaves exactly as
+  before: plain http in, plain http out.
+
 The picker `use` and `task add` open for worktree selection can be
 swapped via a `[picker]` table:
 
@@ -358,6 +382,16 @@ ports, and state that catches most of what's below on its own.
 - **Worktrees usually share a dev database.** Running branches with
   diverging migrations against the same database can break one of them;
   consider per-worktree database names if you switch heavily.
+- **The proxy never verifies a backend's TLS certificate.** With
+  `[repos.<name>.https].backend = true`, requests to the worktree server go
+  out over https, but certificate verification is deliberately skipped:
+  mkcert's local CA isn't in Node's trust store, and this is loopback-only
+  development traffic, so the friction of verifying it isn't worth it.
+- **The `http://`/`https://` scheme in a `serve` template's
+  `{<repo>.port}` reference is your responsibility.** wtshunt substitutes
+  only the port number; whether `API_URL=http://127.0.0.1:{api.port}`
+  should actually read `https://` depends on how you set up `api`'s own
+  `[repos.api.https]`, and wtshunt has no way to check that for you.
 
 ## Shell completion
 

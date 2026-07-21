@@ -1,13 +1,29 @@
+import { accessSync, constants } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parse } from 'smol-toml';
+
+/**
+ * Optional `[repos.<name>.https]` table. `cert`/`key` TLS-ify the fixed-port
+ * listener itself (a mkcert-style pair, typically reused as-is from the
+ * worktree servers); `backend` makes the proxy connect to the worktree
+ * server over https instead of http. Either can be set independently: a
+ * plain-http listener can still forward to an https backend, and a
+ * TLS-terminating listener can still forward to a plain-http backend.
+ */
+export interface RepoHttpsConfig {
+  cert?: string;
+  key?: string;
+  backend: boolean;
+}
 
 export interface RepoConfig {
   path: string;
   fixedPort: number;
   portRange: [number, number];
   serve: string;
+  https?: RepoHttpsConfig;
 }
 
 /** Optional `[ui]` section configuring how `wtshunt ui` opens serve/proxy panes. */
@@ -242,10 +258,70 @@ function validateRepoConfig(name: string, value: unknown, configPath: string): R
     );
   }
 
+  const httpsRaw = v.https;
+  const https = httpsRaw !== undefined ? validateHttpsConfig(name, httpsRaw, configPath) : undefined;
+
   return {
     path: resolve(expandTilde(v.path)),
     fixedPort: v.fixed_port,
     portRange: [v.port_range[0], v.port_range[1]],
     serve: v.serve,
+    ...(https !== undefined ? { https } : {}),
   };
+}
+
+/**
+ * `cert`/`key` must be set together or not at all — one without the other
+ * is almost certainly a typo, so fail fast rather than silently falling
+ * back to plain http. Existence (not readability of content, which happens
+ * at proxy start) is checked here so a bad path surfaces at config-load
+ * time rather than mid-`wtshunt proxy`.
+ */
+function validateHttpsConfig(name: string, value: unknown, configPath: string): RepoHttpsConfig {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error(`repos.${name}.https must be a table in ${configPath}`);
+  }
+  const v = value as Record<string, unknown>;
+
+  const hasCert = v.cert !== undefined;
+  const hasKey = v.key !== undefined;
+  if (hasCert !== hasKey) {
+    throw new Error(
+      `repos.${name}.https.cert and repos.${name}.https.key must both be set, or both omitted, in ${configPath}.`
+    );
+  }
+
+  if (v.backend !== undefined && typeof v.backend !== 'boolean') {
+    throw new Error(`repos.${name}.https.backend must be a boolean in ${configPath}`);
+  }
+  const backend = v.backend === true;
+
+  if (!hasCert) {
+    return { backend };
+  }
+
+  if (typeof v.cert !== 'string' || v.cert.length === 0) {
+    throw new Error(`repos.${name}.https.cert must be a non-empty string in ${configPath}`);
+  }
+  if (typeof v.key !== 'string' || v.key.length === 0) {
+    throw new Error(`repos.${name}.https.key must be a non-empty string in ${configPath}`);
+  }
+
+  const cert = resolve(expandTilde(v.cert));
+  const key = resolve(expandTilde(v.key));
+
+  for (const [label, filePath] of [
+    ['cert', cert],
+    ['key', key],
+  ] as const) {
+    try {
+      accessSync(filePath, constants.R_OK);
+    } catch {
+      throw new Error(
+        `repos.${name}.https.${label} at ${filePath} does not exist or is not readable, set in ${configPath}.`
+      );
+    }
+  }
+
+  return { cert, key, backend };
 }

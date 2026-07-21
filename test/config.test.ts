@@ -409,3 +409,202 @@ test("config: a repo's fixed_port falling inside its own port_range throws a val
     }
   );
 });
+
+test('config: [repos.<name>.https] parses cert/key/backend and expands tilde in the paths', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-'));
+  const home = await mkdtemp(join(tmpdir(), 'wtshunt-home-https-'));
+  try {
+    const certsDir = join(home, 'certs');
+    await mkdir(certsDir, { recursive: true });
+    await writeFile(join(certsDir, 'localhost.pem'), 'dummy cert content');
+    await writeFile(join(certsDir, 'localhost-key.pem'), 'dummy key content');
+
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.api]',
+        'path = "/tmp/api"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[repos.api.https]',
+        'cert = "~/certs/localhost.pem"',
+        'key = "~/certs/localhost-key.pem"',
+        'backend = true',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot, HOME: home }, async () => {
+      const config = await loadConfig();
+      assert.equal(config.repos.api.https?.cert, join(home, 'certs', 'localhost.pem'));
+      assert.equal(config.repos.api.https?.key, join(home, 'certs', 'localhost-key.pem'));
+      assert.equal(config.repos.api.https?.backend, true);
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('config: [repos.<name>.https] with only backend = true (no cert/key) is allowed', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-backend-only-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.api]',
+        'path = "/tmp/api"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[repos.api.https]',
+        'backend = true',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      const config = await loadConfig();
+      assert.equal(config.repos.api.https?.backend, true);
+      assert.equal(config.repos.api.https?.cert, undefined);
+      assert.equal(config.repos.api.https?.key, undefined);
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
+test('config: omitting [repos.<name>.https] leaves https undefined (unchanged http behavior)', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-no-https-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      ['[repos.api]', 'path = "/tmp/api"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
+        '\n'
+      )
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      const config = await loadConfig();
+      assert.equal(config.repos.api.https, undefined);
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
+test('config: https.cert without https.key throws a validation error naming the repo', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-cert-only-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.api]',
+        'path = "/tmp/api"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[repos.api.https]',
+        'cert = "/tmp/does-not-matter.pem"',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /repos\.api\.https\.cert/);
+          assert.match(err.message, /repos\.api\.https\.key/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
+test('config: https.key without https.cert throws a validation error naming the repo', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-key-only-'));
+  try {
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.api]',
+        'path = "/tmp/api"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[repos.api.https]',
+        'key = "/tmp/does-not-matter-key.pem"',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /repos\.api\.https\.cert/);
+          assert.match(err.message, /repos\.api\.https\.key/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+  }
+});
+
+test('config: https.cert pointing at a nonexistent file throws a validation error', async () => {
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-missing-cert-'));
+  const home = await mkdtemp(join(tmpdir(), 'wtshunt-home-https-missing-'));
+  try {
+    const certsDir = join(home, 'certs');
+    await mkdir(certsDir, { recursive: true });
+    await writeFile(join(certsDir, 'localhost-key.pem'), 'dummy key content');
+    // Deliberately no localhost.pem written, so the cert path does not exist.
+
+    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await writeFile(
+      join(configDirRoot, 'wtshunt', 'config.toml'),
+      [
+        '[repos.api]',
+        'path = "/tmp/api"',
+        'fixed_port = 3000',
+        'port_range = [3101, 3199]',
+        'serve = "echo {port}"',
+        '',
+        '[repos.api.https]',
+        'cert = "~/certs/localhost.pem"',
+        'key = "~/certs/localhost-key.pem"',
+        '',
+      ].join('\n')
+    );
+
+    await withEnv({ XDG_CONFIG_HOME: configDirRoot, HOME: home }, async () => {
+      await assert.rejects(
+        () => loadConfig(),
+        (err: Error) => {
+          assert.match(err.message, /repos\.api\.https\.cert/);
+          assert.match(err.message, /does not exist/);
+          return true;
+        }
+      );
+    });
+  } finally {
+    await rm(configDirRoot, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});

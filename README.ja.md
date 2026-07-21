@@ -123,6 +123,27 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 - ポートの重複は設定の読み込み時にチェックされます。
   2つのリポジトリが同じ `fixed_port` を使うこと、`port_range` 同士が重なること、どのリポジトリの `fixed_port` もいずれかのリポジトリの `port_range`(自分自身の range も含む)に収まってしまうことは、いずれも即座にエラーになり、関係するリポジトリ名が示されます。
 
+リポジトリごとに、任意で `[repos.<name>.https]` テーブルも設定できます。
+mkcert(などの)証明書ですでに https 起動している worktree のサーバ向けの設定です:
+
+```toml
+[repos.api.https]
+cert = "~/certs/localhost.pem"      # fixed_port をこの証明書で TLS 化
+key = "~/certs/localhost-key.pem"
+backend = true                       # worktree のサーバへの転送も https にする
+```
+
+- `cert`/`key` は固定ポートの受け口自体を TLS 化します。
+  mkcert が発行した `localhost`/`127.0.0.1` 用の証明書は、そのまま指定できることがほとんどです。
+  worktree のサーバがすでに信頼しているのと同じ証明書だからです。
+  `cert` と `key` はセットで指定するか、両方省略するかのどちらかにしてください。
+  どちらか一方のパスが存在しない、あるいは読み込めない場合は、設定の読み込み自体が即座に失敗します。
+  パスは `path` と同じく `~` 展開に対応しています。
+- `backend`(デフォルトは `false`)を `true` にすると、プロキシから worktree のサーバへの転送も https になります。
+  バックエンド自体が TLS を終端している構成向けです。
+  `cert`/`key` とは独立しており、http で受けて https に転送する構成も、https で受けて http に転送する構成も、自由に組み合わせられます。
+- `[repos.<name>.https]` テーブル自体が無ければ、プロキシは従来通り http で受けて http で転送します。
+
 `use` や `task add` の worktree 選択に使うピッカーは、`[picker]` テーブルで差し替えられます:
 
 ```toml
@@ -288,6 +309,12 @@ wtshunt 自身のバージョン(commit hash 付き)、Node と platform、設�
 - **worktree 間で開発用データベースを共有しがち。**
   マイグレーションが分岐したブランチ同士を同じデータベースに向けて動かすと、どちらかが壊れ得ます。
   頻繁に切り替えるなら worktree ごとのデータベース名を検討してください。
+- **転送先の TLS 証明書は検証しない。**
+  `[repos.<name>.https].backend = true` にすると、worktree のサーバへのリクエストは https で送られますが、証明書の検証はあえて省いています。
+  mkcert のローカル CA は Node の信頼ストアに入っておらず、この通信は loopback に閉じた開発用途なので、検証の手間に見合わないためです。
+- **`serve` テンプレートの `{<repo>.port}` を使う URL のスキーム(`http://` か `https://`)は設定側の責任。**
+  wtshunt が置換するのはポート番号だけです。
+  `API_URL=http://127.0.0.1:{api.port}` を `https://` にすべきかどうかは `api` 自身の `[repos.api.https]` の設定次第で、wtshunt 側で検証することはできません。
 
 ## シェル補完
 
