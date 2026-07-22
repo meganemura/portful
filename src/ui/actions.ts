@@ -132,6 +132,42 @@ export function invalidKeyHint(row: UiRow | undefined, key: string): string {
   return `Key "${keyLabel}" isn't available on this row.`;
 }
 
+/**
+ * The `pendingKey` (see `ui/model.ts`) of the row `action` is about to
+ * *stop*, if any -- the stop-side counterpart to `ActionDeps.onStart`
+ * below, but called by `wtshunt ui`'s key handler itself, before
+ * `executeAction` runs, rather than by `executeAction` after the fact.
+ * Stopping (unlike starting) has no "did it actually do anything" guard to
+ * wait for -- `x`/stop-side-Enter always sends the signal, and
+ * `toggle-proxy` only takes the stop branch when `overview` already shows
+ * the proxy running -- so the pending entry can be recorded straight from
+ * the key press, using the same `overview` snapshot `keyToAction` resolved
+ * the action against, with nothing left to fake in a test.
+ *
+ * - `stop`: the target worktree's key.
+ * - `restart`: the target worktree's key too -- it stops before it starts,
+ *   so the `◐` should read as pending from the first moment either way; if
+ *   the start phase actually runs, `onStart` fires for the same key
+ *   afterwards and overwrites the entry's `kind` from `'stop'` to
+ *   `'start'`.
+ * - `toggle-proxy`: the repo's key, but only when `overview` shows that
+ *   repo's proxy already running (i.e. this invocation will stop it, not
+ *   start it) -- the start side stays `onStart`'s job, as before.
+ * - everything else (`use-worktree`, `use-task`, `serve`, `direct`,
+ *   `none`, `quit`): `undefined`, nothing to stop.
+ */
+export function pendingStopEffect(action: Action, overview: Overview): string | undefined {
+  switch (action.type) {
+    case 'stop':
+    case 'restart':
+      return pendingKey(action.repo, action.worktree);
+    case 'toggle-proxy':
+      return proxyPid(overview, action.repo) !== undefined ? pendingKey(action.repo) : undefined;
+    default:
+      return undefined;
+  }
+}
+
 /** Everything `executeAction` needs beyond the current `Overview` snapshot, injected so it's testable without touching real state/processes. */
 export interface ActionDeps {
   setActiveWorktree(repo: string, worktree: string): Promise<SetActiveResult>;
@@ -152,7 +188,10 @@ export interface ActionDeps {
    * `wtshunt ui` (the only real caller) uses this to record the `◐`
    * "starting up" indicator's start time; optional so the rest of this
    * module's test suite, which doesn't care about that indicator, can omit
-   * it.
+   * it. For `restart`, this fires for the same key `pendingStopEffect`
+   * (below) already recorded as a *stop* pending entry -- `wtshunt ui`
+   * overwrites it in place, flipping the entry's kind from `'stop'` to
+   * `'start'` rather than leaving two competing entries.
    */
   onStart?(key: string): void;
 }

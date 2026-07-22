@@ -4,12 +4,14 @@ import {
   buildRows,
   moveSelection,
   pendingKey,
+  PENDING_STOP_TIMEOUT_MS,
   PENDING_TIMEOUT_MS,
   prunePending,
   proxyPid,
   repoPath,
   serverPid,
   worktreePath,
+  type PendingEntry,
 } from '../src/ui/model.ts';
 import type { Overview } from '../src/overview.ts';
 
@@ -166,13 +168,21 @@ test('pendingKey: bare repo name for a proxy row, "repo/worktree" for a server r
   assert.equal(pendingKey('api', 'api-main'), 'api/api-main');
 });
 
-test('prunePending: drops an entry once the overview observes it running -- a server row via serverPid, a proxy row via proxyPid', () => {
+function startEntry(since: number): PendingEntry {
+  return { kind: 'start', since };
+}
+
+function stopEntry(since: number): PendingEntry {
+  return { kind: 'stop', since };
+}
+
+test('prunePending: drops a start entry once the overview observes it running -- a server row via serverPid, a proxy row via proxyPid', () => {
   // OVERVIEW: api/api-main has a server (pid 111); api itself has a proxy
   // (pid 222); front and front/front-main have neither.
   const pending = new Map([
-    ['api/api-main', 1000], // observed running -> dropped.
-    ['api', 1000], // observed running -> dropped.
-    ['front/front-main', 1000], // not observed, not timed out -> kept.
+    ['api/api-main', startEntry(1000)], // observed running -> dropped.
+    ['api', startEntry(1000)], // observed running -> dropped.
+    ['front/front-main', startEntry(1000)], // not observed, not timed out -> kept.
   ]);
 
   const result = prunePending(pending, OVERVIEW, 1000 + 1); // barely any time elapsed.
@@ -180,8 +190,8 @@ test('prunePending: drops an entry once the overview observes it running -- a se
   assert.deepEqual([...result.keys()], ['front/front-main']);
 });
 
-test('prunePending: drops an entry once PENDING_TIMEOUT_MS has elapsed, even though it was never observed running', () => {
-  const pending = new Map([['front/front-main', 1000]]);
+test('prunePending: drops a start entry once PENDING_TIMEOUT_MS has elapsed, even though it was never observed running', () => {
+  const pending = new Map([['front/front-main', startEntry(1000)]]);
 
   const stillWaiting = prunePending(pending, OVERVIEW, 1000 + PENDING_TIMEOUT_MS - 1);
   assert.deepEqual([...stillWaiting.keys()], ['front/front-main']);
@@ -190,24 +200,71 @@ test('prunePending: drops an entry once PENDING_TIMEOUT_MS has elapsed, even tho
   assert.deepEqual([...timedOut.keys()], []);
 });
 
-test('prunePending: keeps an entry that is neither observed running nor timed out, and returns a fresh Map rather than mutating the input', () => {
-  const pending = new Map([['front/front-main', 1000]]);
+test('prunePending: keeps a start entry that is neither observed running nor timed out, and returns a fresh Map rather than mutating the input', () => {
+  const pending = new Map([['front/front-main', startEntry(1000)]]);
   const result = prunePending(pending, OVERVIEW, 1500);
 
   assert.deepEqual([...result.keys()], ['front/front-main']);
   assert.notEqual(result, pending);
   assert.deepEqual([...pending.keys()], ['front/front-main'], 'the input map must not be mutated');
+  assert.deepEqual(result.get('front/front-main'), startEntry(1000));
 });
 
-test('prunePending: independently resolves multiple entries in a single call', () => {
+test('prunePending: independently resolves multiple start entries in a single call', () => {
   const pending = new Map([
-    ['api/api-main', 1000], // observed running -> dropped.
-    ['api', 1000], // observed running -> dropped.
-    ['front/front-main', 1000], // neither -> kept (not timed out yet).
-    ['front', 1000 - PENDING_TIMEOUT_MS], // not observed, already past the timeout -> dropped.
+    ['api/api-main', startEntry(1000)], // observed running -> dropped.
+    ['api', startEntry(1000)], // observed running -> dropped.
+    ['front/front-main', startEntry(1000)], // neither -> kept (not timed out yet).
+    ['front', startEntry(1000 - PENDING_TIMEOUT_MS)], // not observed, already past the timeout -> dropped.
   ]);
 
   const result = prunePending(pending, OVERVIEW, 1000);
 
   assert.deepEqual([...result.keys()], ['front/front-main']);
+});
+
+test('prunePending: drops a stop entry once the overview observes it no longer running -- the mirror image of the start case', () => {
+  // OVERVIEW: front and front/front-main have neither a server nor a proxy,
+  // so both read as "observed not running" -- the condition a stop entry
+  // waits for.
+  const pending = new Map([
+    ['front/front-main', stopEntry(1000)], // observed not running -> dropped.
+    ['front', stopEntry(1000)], // observed not running -> dropped.
+    ['api/api-main', stopEntry(1000)], // still observed running -> kept.
+  ]);
+
+  const result = prunePending(pending, OVERVIEW, 1000 + 1);
+
+  assert.deepEqual([...result.keys()], ['api/api-main']);
+});
+
+test('prunePending: drops a stop entry once PENDING_STOP_TIMEOUT_MS has elapsed, even though it is still observed running', () => {
+  const pending = new Map([['api/api-main', stopEntry(1000)]]); // api/api-main has pid 111 in OVERVIEW -- stays "running" throughout.
+
+  const stillWaiting = prunePending(pending, OVERVIEW, 1000 + PENDING_STOP_TIMEOUT_MS - 1);
+  assert.deepEqual([...stillWaiting.keys()], ['api/api-main']);
+
+  const timedOut = prunePending(pending, OVERVIEW, 1000 + PENDING_STOP_TIMEOUT_MS);
+  assert.deepEqual([...timedOut.keys()], []);
+});
+
+test('prunePending: keeps a stop entry that is still observed running and not yet timed out', () => {
+  const pending = new Map([['api/api-main', stopEntry(1000)]]);
+  const result = prunePending(pending, OVERVIEW, 1000 + PENDING_STOP_TIMEOUT_MS - 1);
+
+  assert.deepEqual([...result.keys()], ['api/api-main']);
+  assert.deepEqual(result.get('api/api-main'), stopEntry(1000));
+});
+
+test('prunePending: independently resolves a mix of start and stop entries in a single call', () => {
+  const pending = new Map([
+    ['api/api-main', stopEntry(1000)], // stop, still observed running -> kept.
+    ['api', startEntry(1000)], // start, observed running -> dropped.
+    ['front/front-main', startEntry(1000)], // start, not observed, not timed out -> kept.
+    ['front', stopEntry(1000)], // stop, observed not running -> dropped.
+  ]);
+
+  const result = prunePending(pending, OVERVIEW, 1000 + 1);
+
+  assert.deepEqual(new Set(result.keys()), new Set(['api/api-main', 'front/front-main']));
 });

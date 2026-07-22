@@ -136,6 +136,28 @@ export function proxyPid(overview: Overview, repo: string): number | undefined {
 export const PENDING_TIMEOUT_MS = 15000;
 
 /**
+ * How long `wtshunt ui` waits, after *stopping* a server/proxy, for a later
+ * overview refresh to observe it actually gone before giving up on the `◐`
+ * "stopping" indicator and falling back to the ordinary `●`/`○` one (see
+ * `prunePending`). Much shorter than `PENDING_TIMEOUT_MS`: `stopServer`'s
+ * own exit-poll (see `commands/stop.ts`) already caps at ~2s, and a stop
+ * that times out leaves the server alive with a warning already on the
+ * message line -- there's nothing more for `◐` to usefully wait for, so it
+ * reverts to `●` promptly instead of lingering for the full start-side
+ * timeout.
+ */
+export const PENDING_STOP_TIMEOUT_MS = 5000;
+
+/** Which direction a pending-indicator entry is waiting on: a start (see `PENDING_TIMEOUT_MS`) or a stop (see `PENDING_STOP_TIMEOUT_MS`). */
+export type PendingKind = 'start' | 'stop';
+
+/** One `wtshunt ui` pending-indicator bookkeeping entry: which direction it's waiting on, and when the wait began (`Date.now()`-shaped). */
+export interface PendingEntry {
+  kind: PendingKind;
+  since: number;
+}
+
+/**
  * Canonical key `wtshunt ui`'s in-process pending-indicator bookkeeping
  * (and `renderLines`'s `pendingKeys` set) uses to identify a row: the bare
  * repo name for a repo/proxy row, or `repo/worktree` for a worktree/server
@@ -157,26 +179,38 @@ function isObservedRunning(overview: Overview, key: string): boolean {
 }
 
 /**
- * Prunes a "row key -> start timestamp" pending map -- `wtshunt ui`'s own
+ * Prunes a "row key -> {kind, since}" pending map -- `wtshunt ui`'s own
  * bookkeeping for the `◐` indicator -- against a fresh `overview` snapshot
- * and the current time. An entry drops out once its row is observed
+ * and the current time. A `start` entry drops out once its row is observed
  * running (the ◐ has done its job; the row's real pid/proxy state now
  * renders `●` on its own) or once `PENDING_TIMEOUT_MS` has elapsed with no
  * observed start (falls back to `○` -- a start failure is visible in the
  * pane itself, so `wtshunt ui` just stops waiting rather than guessing
- * why). Pure function of its inputs, so the transition logic is
- * unit-testable without a real timer, process, or terminal.
+ * why). A `stop` entry drops out the moment its row is observed *not*
+ * running anymore (falls back to `○`) or once `PENDING_STOP_TIMEOUT_MS` has
+ * elapsed with the row still observed running (falls back to `●` -- same
+ * "stop stops waiting, doesn't guess why" reasoning, just mirrored). Pure
+ * function of its inputs, so the transition logic is unit-testable without
+ * a real timer, process, or terminal.
  */
-export function prunePending(pending: ReadonlyMap<string, number>, overview: Overview, now: number): Map<string, number> {
-  const next = new Map<string, number>();
-  for (const [key, startedAt] of pending) {
-    if (isObservedRunning(overview, key)) {
-      continue;
+export function prunePending(
+  pending: ReadonlyMap<string, PendingEntry>,
+  overview: Overview,
+  now: number
+): Map<string, PendingEntry> {
+  const next = new Map<string, PendingEntry>();
+  for (const [key, entry] of pending) {
+    const running = isObservedRunning(overview, key);
+    if (entry.kind === 'start') {
+      if (running || now - entry.since >= PENDING_TIMEOUT_MS) {
+        continue;
+      }
+    } else {
+      if (!running || now - entry.since >= PENDING_STOP_TIMEOUT_MS) {
+        continue;
+      }
     }
-    if (now - startedAt >= PENDING_TIMEOUT_MS) {
-      continue;
-    }
-    next.set(key, startedAt);
+    next.set(key, entry);
   }
   return next;
 }

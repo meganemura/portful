@@ -308,12 +308,14 @@ without leaving the screen:
 - `q` / `Ctrl-C`: quit.
 
 Each row's leading mark is `●` when it's running and `○` when it's not.
-Right after starting a server or the proxy (`s`, `d`, `r`, `p`, or
-Enter's start side), it shows `◐` instead until the next automatic
-refresh actually observes it running (then it flips to `●`) or 15
-seconds pass with nothing observed (then it falls back to `○` — a start
-failure is visible in the pane itself, so `wtshunt ui` just stops
-waiting rather than guessing why).
+Right after starting or stopping a server or the proxy (`s`, `d`, `x`,
+`r`, `p`, or either side of Enter), it shows `◐` instead until the next
+automatic refresh actually observes the row in the state it's waiting
+for — then it flips to `●` or `○` accordingly — or a timeout passes with
+nothing observed (15 seconds for a start, 5 for a stop), in which case it
+falls back to the ordinary `●`/`○` indicator anyway — a start or stop
+failure is visible in the pane itself, or on the message line, so
+`wtshunt ui` just stops waiting rather than guessing why.
 
 A server whose worktree no longer exists still gets a row (marked
 `(worktree gone)`), so `x` can stop it right there instead of needing

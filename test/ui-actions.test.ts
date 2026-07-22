@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { executeAction, invalidKeyHint, keyToAction, pendingMessage, type ActionDeps } from '../src/ui/actions.ts';
+import {
+  executeAction,
+  invalidKeyHint,
+  keyToAction,
+  pendingMessage,
+  pendingStopEffect,
+  type ActionDeps,
+} from '../src/ui/actions.ts';
 import type { UiRow } from '../src/ui/model.ts';
 import type { Overview } from '../src/overview.ts';
 import type { Mux } from '../src/mux.ts';
@@ -139,6 +146,37 @@ test('pendingMessage: one line per action, in the tone of the matching executeAc
   assert.equal(pendingMessage({ type: 'toggle-proxy', repo: 'api' }), 'Toggling proxy for "api"…');
   assert.equal(pendingMessage({ type: 'none' }), '');
   assert.equal(pendingMessage({ type: 'quit' }), '');
+});
+
+test('pendingStopEffect: stop and restart both key on the target worktree, regardless of what overview shows', () => {
+  assert.equal(
+    pendingStopEffect({ type: 'stop', repo: 'api', worktree: 'api-main' }, makeOverview()),
+    'api/api-main'
+  );
+  assert.equal(
+    pendingStopEffect({ type: 'restart', repo: 'api', worktree: 'api-main' }, makeOverview()),
+    'api/api-main'
+  );
+});
+
+test('pendingStopEffect: toggle-proxy keys on the repo only when overview already shows that proxy running (i.e. this press stops it)', () => {
+  // makeOverview() has a running proxy (pid 999) -- this press takes the stop branch.
+  assert.equal(pendingStopEffect({ type: 'toggle-proxy', repo: 'api' }, makeOverview()), 'api');
+
+  // No proxy running -- this press would start it instead, which is onStart's job, not this one's.
+  const overviewNoProxy = makeOverview();
+  delete overviewNoProxy.repos[0].proxy;
+  assert.equal(pendingStopEffect({ type: 'toggle-proxy', repo: 'api' }, overviewNoProxy), undefined);
+});
+
+test('pendingStopEffect: every other action type has nothing to stop', () => {
+  const overview = makeOverview();
+  assert.equal(pendingStopEffect({ type: 'use-worktree', repo: 'api', worktree: 'api-main' }, overview), undefined);
+  assert.equal(pendingStopEffect({ type: 'use-task', task: 'prod' }, overview), undefined);
+  assert.equal(pendingStopEffect({ type: 'serve', repo: 'api', worktree: 'api-main' }, overview), undefined);
+  assert.equal(pendingStopEffect({ type: 'direct', repo: 'api', worktree: 'api-main' }, overview), undefined);
+  assert.equal(pendingStopEffect({ type: 'none' }, overview), undefined);
+  assert.equal(pendingStopEffect({ type: 'quit' }, overview), undefined);
 });
 
 test('executeAction: use-worktree calls setActiveWorktree and reports whether a server is running', async () => {

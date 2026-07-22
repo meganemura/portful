@@ -2,8 +2,15 @@ import readline from 'node:readline';
 import { loadConfig } from '../config.ts';
 import { resolveMux } from '../mux.ts';
 import { buildOverview, type Overview } from '../overview.ts';
-import { buildRows, moveSelection, prunePending, type UiRow } from '../ui/model.ts';
-import { keyToAction, executeAction, pendingMessage, invalidKeyHint, type ActionDeps } from '../ui/actions.ts';
+import { buildRows, moveSelection, prunePending, type PendingEntry, type UiRow } from '../ui/model.ts';
+import {
+  keyToAction,
+  executeAction,
+  pendingMessage,
+  pendingStopEffect,
+  invalidKeyHint,
+  type ActionDeps,
+} from '../ui/actions.ts';
 import {
   renderLines,
   CLEAR_AND_HOME,
@@ -46,19 +53,22 @@ export async function uiCommand(): Promise<void> {
   const config = await loadConfig();
   const mux = resolveMux(config);
 
-  // "row key -> start timestamp" bookkeeping for the `◐` indicator (see
-  // `ui/model.ts`'s `prunePending`): `onStart` records one the instant
-  // `executeAction` actually opens a serve/direct/proxy pane, and every
-  // `refresh()` below prunes it once the row is observed running or 15s
-  // have passed with no observed start.
-  let pending = new Map<string, number>();
+  // "row key -> {kind, since}" bookkeeping for the `◐` indicator (see
+  // `ui/model.ts`'s `prunePending`): `onStart` records a `'start'` entry
+  // the instant `executeAction` actually opens a serve/direct/proxy pane;
+  // the keypress handler below records a `'stop'` entry via
+  // `pendingStopEffect` before `executeAction` even runs, since stopping
+  // has no "did it actually do anything" guard to wait for. Every
+  // `refresh()` below prunes both kinds once the row's observed state
+  // matches what they're waiting for, or their respective timeout elapses.
+  let pending = new Map<string, PendingEntry>();
   const deps: ActionDeps = {
     setActiveWorktree,
     applyTask,
     stopServer,
     mux,
     onStart: (key) => {
-      pending.set(key, Date.now());
+      pending.set(key, { kind: 'start', since: Date.now() });
     },
   };
 
@@ -162,6 +172,16 @@ export async function uiCommand(): Promise<void> {
           draw();
         }
         return;
+      }
+
+      // Record the stop-side `◐` entry (if any) before `executeAction` even
+      // runs — unlike a start, a stop has nothing to wait on to know
+      // whether it "actually did something", so there's no reason to defer
+      // this the way `onStart` defers the start-side entry until the pane
+      // is actually open.
+      const stopKey = pendingStopEffect(action, overview);
+      if (stopKey !== undefined) {
+        pending.set(stopKey, { kind: 'stop', since: Date.now() });
       }
 
       // Show the "in progress" message right away — `stop`/`restart` poll
