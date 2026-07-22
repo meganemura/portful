@@ -1,4 +1,4 @@
-import type { UiRow } from './model.ts';
+import { pendingKey, type UiRow } from './model.ts';
 
 export const ENTER_ALT_SCREEN = '\x1b[?1049h';
 export const LEAVE_ALT_SCREEN = '\x1b[?1049l';
@@ -24,13 +24,21 @@ export interface UiMessage {
   isError: boolean;
 }
 
-/** `●` for "something is actually running here", `○` for "it isn't" — lets a glance at the list answer that before reading any pid/proxy text. */
+/**
+ * `●` for "something is actually running here", `○` for "it isn't", `◐`
+ * for "`wtshunt ui` just started it and hasn't observed it running yet"
+ * (see `ui/model.ts`'s `prunePending`) — lets a glance at the list answer
+ * that before reading any pid/proxy text. `◐` deliberately carries no
+ * color of its own, same as `●`/`○` — it's just a third state of the same
+ * plain indicator, not a warning.
+ */
 const RUNNING = '●';
 const STOPPED = '○';
+const PENDING = '◐';
 
-function formatRow(row: UiRow): string {
+function formatRow(row: UiRow, pendingKeys: ReadonlySet<string>): string {
   if (row.kind === 'repo') {
-    const indicator = row.proxyRunning ? RUNNING : STOPPED;
+    const indicator = pendingKeys.has(pendingKey(row.repo)) ? PENDING : row.proxyRunning ? RUNNING : STOPPED;
     // The arrow only makes sense while the proxy is actually forwarding
     // traffic: stopped means nothing is being forwarded, and running with
     // no active worktree set means the proxy has nowhere to send it yet.
@@ -40,7 +48,7 @@ function formatRow(row: UiRow): string {
   }
 
   if (row.kind === 'worktree') {
-    const indicator = row.pid !== undefined ? RUNNING : STOPPED;
+    const indicator = pendingKeys.has(pendingKey(row.repo, row.worktree)) ? PENDING : row.pid !== undefined ? RUNNING : STOPPED;
     const activeMark = row.active ? '*' : ' ';
     const portText = row.port !== undefined ? String(row.port) : '-';
     const pidText = row.pid !== undefined ? String(row.pid) : '-';
@@ -58,18 +66,21 @@ function formatRow(row: UiRow): string {
 
 /**
  * Help text per row kind, listing only the keys that actually do
- * something there — matches the existing `key label` style (`u/enter
- * use`, `p proxy`, ...). `j/k move` and `q quit` apply regardless of the
- * selected row's kind (navigation always works; `q`/`ctrl-c` quit is
- * checked in `keyToAction` before it even looks at the row), so both are
- * listed on every line. Kept in lockstep with `VALID_ROW_KINDS` in
- * `actions.ts` by convention rather than by construction — the
- * ui-render test suite cross-checks the two so this can't silently drift
- * from what `keyToAction` actually accepts.
+ * something there — matches the existing `key label` style (`u use`,
+ * `p proxy`, ...), merging keys that land on the same phrase for a given
+ * row kind (`enter`+`p` both toggle the proxy on a repo row; `s`+`d` both
+ * open a serve pane on a worktree row, one sticky and one `--direct`;
+ * `u`+`enter` both apply a task on a task row). `j/k move` and `q quit`
+ * apply regardless of the selected row's kind (navigation always works;
+ * `q`/`ctrl-c` quit is checked in `keyToAction` before it even looks at
+ * the row), so both are listed on every line. Kept in lockstep with
+ * `VALID_ROW_KINDS` in `actions.ts` by convention rather than by
+ * construction — the ui-render test suite cross-checks the two so this
+ * can't silently drift from what `keyToAction` actually accepts.
  */
 const HELP_BY_KIND: Record<UiRow['kind'], string> = {
-  repo: 'j/k move  p proxy  q quit',
-  worktree: 'j/k move  u/enter use  s serve  x stop  r restart  p proxy  q quit',
+  repo: 'j/k move  enter/p proxy  q quit',
+  worktree: 'j/k move  u use  enter on/off  s/d serve  x stop  r restart  p proxy  q quit',
   task: 'j/k move  u/enter apply  q quit',
 };
 
@@ -94,11 +105,20 @@ function formatMessageLine(message: UiMessage): string {
  * cursor on the selected one), a blank separator, the message line (blank
  * when there's nothing to say, so its absence never moves the help line
  * below it), and a help line listing only the keys that do something on
- * the selected row. Pure function of the row list/selection/message, so
- * it's testable without a terminal — actual raw-mode drawing (writing
- * these to the alternate screen) is manual-verification-only.
+ * the selected row. `pendingKeys` — `ui/model.ts`'s `pendingKey`-shaped
+ * set of rows `wtshunt ui` just started and hasn't observed running yet —
+ * overrides those rows' `●`/`○` indicator with `◐`; defaults to empty so
+ * every existing caller/test that doesn't care about the indicator is
+ * unaffected. Pure function of its inputs, so it's testable without a
+ * terminal — actual raw-mode drawing (writing these to the alternate
+ * screen) is manual-verification-only.
  */
-export function renderLines(rows: UiRow[], selectedIndex: number, message: UiMessage): string[] {
+export function renderLines(
+  rows: UiRow[],
+  selectedIndex: number,
+  message: UiMessage,
+  pendingKeys: ReadonlySet<string> = new Set()
+): string[] {
   const lines: string[] = [];
 
   if (rows.length === 0) {
@@ -106,7 +126,7 @@ export function renderLines(rows: UiRow[], selectedIndex: number, message: UiMes
   } else {
     rows.forEach((row, i) => {
       const cursor = i === selectedIndex ? '> ' : '  ';
-      lines.push(cursor + formatRow(row));
+      lines.push(cursor + formatRow(row, pendingKeys));
     });
   }
 

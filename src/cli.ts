@@ -273,9 +273,16 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
     .command(
       'serve [repo]',
       'Start a server for the active (or given) worktree in the foreground',
-      repoPositional,
+      (y) =>
+        repoPositional(y).option('direct', {
+          type: 'boolean',
+          default: false,
+          describe:
+            'Bind the fixed_port directly instead of the sticky worktree port (a one-off substitution; ' +
+            'refuses if the proxy is running or fixed_port is occupied)',
+        }),
       handle(async (argv) => {
-        await serveCommand({ repo: argv.repo as string | undefined });
+        await serveCommand({ repo: argv.repo as string | undefined, direct: argv.direct as boolean });
       })
     )
     .command(

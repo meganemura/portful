@@ -210,6 +210,17 @@ start a second server for a worktree that already has one running.
 Forwards `SIGINT`/`SIGTERM` to the child process group, so `Ctrl-C` stops
 it cleanly.
 
+`wtshunt serve [repo] --direct` substitutes the repo's `fixed_port` for
+`{port}` instead of the usual sticky worktree port, for running that
+worktree exactly as it'd look bound in production, no proxy in front of
+it. It's a one-off, temporary substitution: the sticky ports map is left
+completely untouched. Refuses to start if the repo's proxy is already
+running (stop it first — otherwise both would fight over `fixed_port`),
+or if something else already occupies `fixed_port` (reported via `lsof`,
+the same way `wtshunt proxy`'s own occupied-port check does). The
+resulting server entry in `wtshunt status`/`wtshunt ui` shows `fixed_port`
+as its port, same as any other running server.
+
 ### `wtshunt run [repo[/worktree]] <cmd...>`
 
 Runs an arbitrary command inside a worktree's directory, without `cd`-ing
@@ -280,15 +291,29 @@ An interactive terminal UI: navigate every repo's worktrees (and any
 defined tasks) with `j`/`k` or the arrow keys, and act on the selected row
 without leaving the screen:
 
-- `u` / Enter: set the active worktree (on a worktree row), or apply a
-  task (on a task row).
+- `u`: set the active worktree (on a worktree row), or apply a task (on
+  a task row). No-op on a repo row.
+- Enter: toggles the selected row on/off. On a worktree row: stops its
+  server if one's running, starts one otherwise. On a repo row: toggles
+  the proxy, same as `p`. On a task row: applies the task, same as `u`
+  (a task row has no on/off state to toggle).
 - `s`: start a server for the selected worktree.
+- `d`: same, but `--direct` (see `wtshunt serve --direct` above) — for
+  poking at a worktree exactly as it'd run in production, no proxy.
 - `x`: stop it.
 - `r`: restart it (stop, then start, skipping the start if the stop
   timed out).
 - `p`: toggle the proxy for that row's repo: stop it if running, start
   it otherwise.
 - `q` / `Ctrl-C`: quit.
+
+Each row's leading mark is `●` when it's running and `○` when it's not.
+Right after starting a server or the proxy (`s`, `d`, `r`, `p`, or
+Enter's start side), it shows `◐` instead until the next automatic
+refresh actually observes it running (then it flips to `●`) or 15
+seconds pass with nothing observed (then it falls back to `○` — a start
+failure is visible in the pane itself, so `wtshunt ui` just stops
+waiting rather than guessing why).
 
 A server whose worktree no longer exists still gets a row (marked
 `(worktree gone)`), so `x` can stop it right there instead of needing
@@ -441,11 +466,11 @@ The zsh script initializes zsh's completion system itself (it calls
 
 ## Opening panes from `wtshunt ui`
 
-When `wtshunt ui` opens `serve` or `proxy` for a row (`s`/`r`/`p`), it
-launches them as a separate foreground process in a new pane, tab, or
-window, that is, the same kind of process a plain `wtshunt serve`/
-`wtshunt proxy` invocation would be, just started for you. It picks how
-to open that pane in this order:
+When `wtshunt ui` opens `serve` or `proxy` for a row (`s`/`d`/`r`/`p`, or
+Enter's start side), it launches them as a separate foreground process in
+a new pane, tab, or window, that is, the same kind of process a plain
+`wtshunt serve`/`wtshunt proxy` invocation would be, just started for
+you. It picks how to open that pane in this order:
 
 1. A `[ui]` section in `config.toml`, if present, always wins:
 
@@ -506,7 +531,7 @@ needed. That tab keeps `wtshunt ui` itself pinned across the top row,
 with `serve`/`proxy` panes lined up side by side in the row below it,
 in list order. The tab survives even once every server is stopped,
 and the `wtshunt ui` running inside it can open panes too: pressing
-`s`/`p` there lands in the same row.
+`s`/`d`/`p` there lands in the same row.
 
 ## Tasks (experimental)
 

@@ -2,7 +2,7 @@ import readline from 'node:readline';
 import { loadConfig } from '../config.ts';
 import { resolveMux } from '../mux.ts';
 import { buildOverview, type Overview } from '../overview.ts';
-import { buildRows, moveSelection, type UiRow } from '../ui/model.ts';
+import { buildRows, moveSelection, prunePending, type UiRow } from '../ui/model.ts';
 import { keyToAction, executeAction, pendingMessage, invalidKeyHint, type ActionDeps } from '../ui/actions.ts';
 import {
   renderLines,
@@ -45,7 +45,22 @@ export async function uiCommand(): Promise<void> {
 
   const config = await loadConfig();
   const mux = resolveMux(config);
-  const deps: ActionDeps = { setActiveWorktree, applyTask, stopServer, mux };
+
+  // "row key -> start timestamp" bookkeeping for the `◐` indicator (see
+  // `ui/model.ts`'s `prunePending`): `onStart` records one the instant
+  // `executeAction` actually opens a serve/direct/proxy pane, and every
+  // `refresh()` below prunes it once the row is observed running or 15s
+  // have passed with no observed start.
+  let pending = new Map<string, number>();
+  const deps: ActionDeps = {
+    setActiveWorktree,
+    applyTask,
+    stopServer,
+    mux,
+    onStart: (key) => {
+      pending.set(key, Date.now());
+    },
+  };
 
   let overview: Overview = await buildOverview(config);
   let rows: UiRow[] = buildRows(overview);
@@ -66,13 +81,14 @@ export async function uiCommand(): Promise<void> {
   };
 
   const draw = () => {
-    process.stdout.write(CLEAR_AND_HOME + renderLines(rows, selected, message).join('\r\n'));
+    process.stdout.write(CLEAR_AND_HOME + renderLines(rows, selected, message, new Set(pending.keys())).join('\r\n'));
   };
 
   const refresh = async () => {
     try {
       overview = await buildOverview(config);
       rows = buildRows(overview);
+      pending = prunePending(pending, overview, Date.now());
       if (selected > rows.length - 1) {
         selected = Math.max(0, rows.length - 1);
       }

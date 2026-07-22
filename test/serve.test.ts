@@ -253,3 +253,152 @@ test('serve: does not warn when the worktree is given explicitly, even if it dif
     await rm(stateDir, { recursive: true, force: true });
   }
 });
+
+/** Polls for `filePath` to exist with non-empty trimmed content, returning it (or '' on timeout). */
+async function waitForFileContent(filePath: string, timeoutMs: number): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const content = (await readFile(filePath, 'utf8')).trim();
+      if (content) {
+        return content;
+      }
+    } catch {
+      // File may not exist yet.
+    }
+    await sleep(50);
+  }
+  return '';
+}
+
+test('serve --direct: substitutes fixed_port for {port}, records it on the server entry, and leaves the sticky ports map untouched', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-repo-'));
+  const main = join(base, 'main');
+  await mkdir(main, { recursive: true });
+  await git(main, ['init', '-q', '-b', 'main']);
+  await git(main, ['config', 'user.email', 'test@example.com']);
+  await git(main, ['config', 'user.name', 'Test']);
+  await writeFile(join(main, 'f.txt'), 'hi');
+  await git(main, ['add', '.']);
+  await git(main, ['commit', '-q', '-m', 'init']);
+
+  const outFile = join(base, 'direct.port');
+  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-config-'));
+  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  await writeFile(
+    join(configDir, 'wtshunt', 'config.toml'),
+    [
+      '[repos.d]',
+      `path = "${main}"`,
+      'fixed_port = 41900',
+      'port_range = [41901, 41910]',
+      `serve = "echo {port} > '${outFile}'; sleep 30"`,
+      '',
+    ].join('\n')
+  );
+  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-state-'));
+  const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
+
+  let stickyProc: ReturnType<typeof spawn> | undefined;
+  let directProc: ReturnType<typeof spawn> | undefined;
+  try {
+    // First, an ordinary sticky serve, so there's a sticky port on record
+    // for "main" before --direct ever runs.
+    stickyProc = spawn(process.execPath, [binPath, 'serve', 'd/main'], { env, stdio: 'ignore' });
+    await waitForState(stateDir, (s) => s.repos.d?.servers?.main !== undefined, 5000);
+
+    let raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+    let state = JSON.parse(raw) as State;
+    const stickyPort = state.repos.d.servers.main.port;
+    assert.ok(stickyPort >= 41901 && stickyPort <= 41910, `expected a port_range port, got ${stickyPort}`);
+    assert.equal(state.repos.d.ports.main, stickyPort);
+
+    // Stop it -- the sticky assignment survives a stop; only the servers
+    // entry is removed (see state.ts's stopServer).
+    if (stickyProc.pid) {
+      process.kill(stickyProc.pid, 'SIGTERM');
+    }
+    await waitForState(stateDir, (s) => s.repos.d?.servers?.main === undefined, 5000);
+
+    // Now serve --direct: {port} should resolve to fixed_port, not the
+    // sticky port, and the sticky ports map must be left exactly as-is.
+    directProc = spawn(process.execPath, [binPath, 'serve', 'd/main', '--direct'], { env, stdio: 'ignore' });
+    await waitForState(stateDir, (s) => s.repos.d?.servers?.main !== undefined, 5000);
+
+    raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+    state = JSON.parse(raw) as State;
+    assert.equal(state.repos.d.servers.main.port, 41900);
+    assert.equal(state.repos.d.ports.main, stickyPort, 'sticky ports map must be untouched by --direct');
+
+    const outContent = await waitForFileContent(outFile, 5000);
+    assert.equal(outContent, '41900', '{port} inside the serve template must resolve to fixed_port');
+  } finally {
+    for (const proc of [stickyProc, directProc]) {
+      if (proc?.pid) {
+        try {
+          process.kill(proc.pid, 'SIGTERM');
+        } catch {
+          // already gone
+        }
+      }
+    }
+    await sleep(300);
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('serve --direct: refuses to start while the repo\'s proxy is running', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-proxy-repo-'));
+  const main = join(base, 'main');
+  await mkdir(main, { recursive: true });
+  await git(main, ['init', '-q', '-b', 'main']);
+  await git(main, ['config', 'user.email', 'test@example.com']);
+  await git(main, ['config', 'user.name', 'Test']);
+  await writeFile(join(main, 'f.txt'), 'hi');
+  await git(main, ['add', '.']);
+  await git(main, ['commit', '-q', '-m', 'init']);
+
+  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-proxy-config-'));
+  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  await writeFile(
+    join(configDir, 'wtshunt', 'config.toml'),
+    ['[repos.e]', `path = "${main}"`, 'fixed_port = 41950', 'port_range = [41951, 41960]', 'serve = "echo {port}; sleep 30"', ''].join(
+      '\n'
+    )
+  );
+  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-proxy-state-'));
+  const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
+
+  let proxyProc: ReturnType<typeof spawn> | undefined;
+  try {
+    proxyProc = spawn(process.execPath, [binPath, 'proxy', 'e'], { env, stdio: 'ignore' });
+    await waitForState(stateDir, (s) => s.repos.e?.proxy !== undefined, 5000);
+
+    await assert.rejects(
+      () => execFileAsync(process.execPath, [binPath, 'serve', 'e/main', '--direct'], { env }),
+      (err: NodeJS.ErrnoException & { stderr?: string; code?: number }) => {
+        assert.match(String(err.stderr), /Stop "wtshunt proxy" first/);
+        assert.equal(err.code, 1);
+        return true;
+      }
+    );
+
+    const raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+    const state = JSON.parse(raw) as State;
+    assert.equal(state.repos.e?.servers?.main, undefined, 'no server should have started');
+  } finally {
+    if (proxyProc?.pid) {
+      try {
+        process.kill(proxyProc.pid, 'SIGTERM');
+      } catch {
+        // already gone
+      }
+    }
+    await sleep(300);
+    await rm(base, { recursive: true, force: true });
+    await rm(configDir, { recursive: true, force: true });
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});

@@ -4,25 +4,34 @@ import type { Overview } from '../overview.ts';
 import type { SetActiveResult } from '../commands/use.ts';
 import type { TaskUseResult } from '../commands/task.ts';
 import type { StopResult } from '../commands/stop.ts';
-import { buildRows, proxyPid, repoPath, serverPid, worktreePath, type UiRow } from './model.ts';
+import { buildRows, pendingKey, proxyPid, repoPath, serverPid, worktreePath, type UiRow } from './model.ts';
 
 export type Action =
   | { type: 'quit' }
   | { type: 'use-worktree'; repo: string; worktree: string }
   | { type: 'use-task'; task: string }
   | { type: 'serve'; repo: string; worktree: string }
+  | { type: 'direct'; repo: string; worktree: string }
   | { type: 'stop'; repo: string; worktree: string }
   | { type: 'restart'; repo: string; worktree: string }
   | { type: 'toggle-proxy'; repo: string }
   | { type: 'none' };
 
 /**
- * Maps a normalized key (`'u'`, `'return'`, `'s'`, `'x'`, `'r'`, `'p'`,
- * `'q'`, `'ctrl-c'`, ...) and the currently selected row to the action it
- * triggers, if any. Pure and independent of readline/terminal state, so
- * every key binding is unit-testable without a TTY. Navigation
+ * Maps a normalized key (`'u'`, `'return'`, `'s'`, `'d'`, `'x'`, `'r'`,
+ * `'p'`, `'q'`, `'ctrl-c'`, ...) and the currently selected row to the
+ * action it triggers, if any. Pure and independent of readline/terminal
+ * state, so every key binding is unit-testable without a TTY. Navigation
  * (`j`/`k`/arrow keys) is handled by the caller via `moveSelection`
  * instead — it doesn't depend on the selected row.
+ *
+ * `u` and `return` (Enter) are deliberately different bindings, not
+ * aliases of each other: `u` always sets the active worktree/applies a
+ * task, the same "pick this" action regardless of what's currently
+ * running. `return` instead toggles the selected row on/off — stop a
+ * running server or start a stopped one (worktree row), toggle the proxy
+ * (repo row, same as `p`), or apply a task (task row, same as `u`, since a
+ * task row has no on/off state to toggle).
  */
 export function keyToAction(row: UiRow | undefined, key: string): Action {
   if (key === 'q' || key === 'ctrl-c') {
@@ -32,7 +41,7 @@ export function keyToAction(row: UiRow | undefined, key: string): Action {
     return { type: 'none' };
   }
 
-  if (key === 'u' || key === 'return') {
+  if (key === 'u') {
     if (row.kind === 'worktree') {
       return { type: 'use-worktree', repo: row.repo, worktree: row.worktree };
     }
@@ -42,8 +51,24 @@ export function keyToAction(row: UiRow | undefined, key: string): Action {
     return { type: 'none' };
   }
 
+  if (key === 'return') {
+    if (row.kind === 'worktree') {
+      return row.pid !== undefined
+        ? { type: 'stop', repo: row.repo, worktree: row.worktree }
+        : { type: 'serve', repo: row.repo, worktree: row.worktree };
+    }
+    if (row.kind === 'repo') {
+      return { type: 'toggle-proxy', repo: row.repo };
+    }
+    return { type: 'use-task', task: row.task };
+  }
+
   if (key === 's' && row.kind === 'worktree') {
     return { type: 'serve', repo: row.repo, worktree: row.worktree };
+  }
+
+  if (key === 'd' && row.kind === 'worktree') {
+    return { type: 'direct', repo: row.repo, worktree: row.worktree };
   }
 
   if (key === 'x' && row.kind === 'worktree') {
@@ -62,10 +87,10 @@ export function keyToAction(row: UiRow | undefined, key: string): Action {
 }
 
 /** A key `keyToAction` recognizes as bound to *some* action, on the right row kind. */
-export type ActionKey = 'u' | 'return' | 's' | 'x' | 'r' | 'p';
+export type ActionKey = 'u' | 'return' | 's' | 'd' | 'x' | 'r' | 'p';
 
 function isActionKey(key: string): key is ActionKey {
-  return key === 'u' || key === 'return' || key === 's' || key === 'x' || key === 'r' || key === 'p';
+  return key === 'u' || key === 'return' || key === 's' || key === 'd' || key === 'x' || key === 'r' || key === 'p';
 }
 
 /**
@@ -73,12 +98,15 @@ function isActionKey(key: string): key is ActionKey {
  * conditions in `keyToAction` above. Exported so the row-kind help text in
  * `render.ts` (which lists keys per row kind for the ever-visible help
  * line) can be cross-checked against this table in tests, since the two
- * are maintained separately for the sake of display order/labels.
+ * are maintained separately for the sake of display order/labels. `return`
+ * is valid on every row kind now that it toggles per-kind rather than
+ * being a plain alias of `u`.
  */
 export const VALID_ROW_KINDS: Record<ActionKey, UiRow['kind'][]> = {
   u: ['worktree', 'task'],
-  return: ['worktree', 'task'],
+  return: ['worktree', 'repo', 'task'],
   s: ['worktree'],
+  d: ['worktree'],
   x: ['worktree'],
   r: ['worktree'],
   p: ['repo', 'worktree'],
@@ -112,6 +140,21 @@ export interface ActionDeps {
   mux: Mux;
   /** Defaults to `process.kill`; injectable so tests never have to send a real signal. */
   kill?(pid: number, signal: NodeJS.Signals): void;
+  /**
+   * Called exactly when `executeAction` actually opens a fresh serve/direct
+   * pane via a real multiplexer, or starts the proxy — never when a
+   * duplicate-server/already-running guard refuses to, when `restart`'s
+   * stop timed out and skipped its start phase, when `toggle-proxy` takes
+   * the stop branch instead, or when the mux adapter is the `fallback`
+   * (nothing was actually started on the user's behalf, just a command
+   * printed for them to run by hand). `key` is `pendingKey`-shaped: the
+   * bare repo for a proxy start, `repo/worktree` for a serve/direct start.
+   * `wtshunt ui` (the only real caller) uses this to record the `◐`
+   * "starting up" indicator's start time; optional so the rest of this
+   * module's test suite, which doesn't care about that indicator, can omit
+   * it.
+   */
+  onStart?(key: string): void;
 }
 
 function killPid(deps: ActionDeps, pid: number): void {
@@ -150,7 +193,27 @@ async function openServe(overview: Overview, deps: ActionDeps, repo: string, wor
   if (deps.mux.name === 'fallback') {
     return fallbackMessage(options);
   }
+  deps.onStart?.(pendingKey(repo, worktree));
   return `Opened serve for "${repo}/${worktree}" via ${deps.mux.name}.`;
+}
+
+/** `d`'s counterpart to `openServe`: same pane-opening mechanics, but runs `serve --direct` instead. */
+async function openDirect(overview: Overview, deps: ActionDeps, repo: string, worktree: string): Promise<string> {
+  const cwd = worktreePath(overview, repo, worktree);
+  const command = wtshuntCommand('serve', `${repo}/${worktree}`, '--direct');
+  const order = rowOrder(overview, (row) => row.kind === 'worktree' && row.repo === repo && row.worktree === worktree);
+  const options = {
+    title: `${repo}/${worktree} (direct)`,
+    command,
+    ...(cwd ? { cwd } : {}),
+    ...(order !== undefined ? { order } : {}),
+  };
+  await deps.mux.open(options);
+  if (deps.mux.name === 'fallback') {
+    return fallbackMessage(options);
+  }
+  deps.onStart?.(pendingKey(repo, worktree));
+  return `Opened direct serve for "${repo}/${worktree}" via ${deps.mux.name}.`;
 }
 
 /**
@@ -172,6 +235,8 @@ export function pendingMessage(action: Action): string {
       return `Applying task "${action.task}"…`;
     case 'serve':
       return `Opening serve for "${action.repo}/${action.worktree}"…`;
+    case 'direct':
+      return `Opening direct serve for "${action.repo}/${action.worktree}"…`;
     case 'stop':
       return `Stopping "${action.repo}/${action.worktree}"…`;
     case 'restart':
@@ -221,6 +286,14 @@ export async function executeAction(action: Action, overview: Overview, deps: Ac
       return openServe(overview, deps, action.repo, action.worktree);
     }
 
+    case 'direct': {
+      const existingPid = serverPid(overview, action.repo, action.worktree);
+      if (existingPid !== undefined) {
+        return `Server already running for "${action.repo}/${action.worktree}" (pid ${existingPid}).`;
+      }
+      return openDirect(overview, deps, action.repo, action.worktree);
+    }
+
     case 'stop': {
       const result = await deps.stopServer(action.repo, action.worktree);
       if (result.status === 'no-server') {
@@ -261,6 +334,7 @@ export async function executeAction(action: Action, overview: Overview, deps: Ac
       if (deps.mux.name === 'fallback') {
         return fallbackMessage(options);
       }
+      deps.onStart?.(pendingKey(action.repo));
       return `Opened proxy for "${action.repo}" via ${deps.mux.name}.`;
     }
   }

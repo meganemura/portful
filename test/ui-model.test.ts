@@ -1,6 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildRows, moveSelection, proxyPid, repoPath, serverPid, worktreePath } from '../src/ui/model.ts';
+import {
+  buildRows,
+  moveSelection,
+  pendingKey,
+  PENDING_TIMEOUT_MS,
+  prunePending,
+  proxyPid,
+  repoPath,
+  serverPid,
+  worktreePath,
+} from '../src/ui/model.ts';
 import type { Overview } from '../src/overview.ts';
 
 const OVERVIEW: Overview = {
@@ -149,4 +159,55 @@ test('lookup helpers: read server pid, worktree/repo path, and proxy pid from an
 
   assert.equal(proxyPid(OVERVIEW, 'api'), 222);
   assert.equal(proxyPid(OVERVIEW, 'front'), undefined);
+});
+
+test('pendingKey: bare repo name for a proxy row, "repo/worktree" for a server row', () => {
+  assert.equal(pendingKey('api'), 'api');
+  assert.equal(pendingKey('api', 'api-main'), 'api/api-main');
+});
+
+test('prunePending: drops an entry once the overview observes it running -- a server row via serverPid, a proxy row via proxyPid', () => {
+  // OVERVIEW: api/api-main has a server (pid 111); api itself has a proxy
+  // (pid 222); front and front/front-main have neither.
+  const pending = new Map([
+    ['api/api-main', 1000], // observed running -> dropped.
+    ['api', 1000], // observed running -> dropped.
+    ['front/front-main', 1000], // not observed, not timed out -> kept.
+  ]);
+
+  const result = prunePending(pending, OVERVIEW, 1000 + 1); // barely any time elapsed.
+
+  assert.deepEqual([...result.keys()], ['front/front-main']);
+});
+
+test('prunePending: drops an entry once PENDING_TIMEOUT_MS has elapsed, even though it was never observed running', () => {
+  const pending = new Map([['front/front-main', 1000]]);
+
+  const stillWaiting = prunePending(pending, OVERVIEW, 1000 + PENDING_TIMEOUT_MS - 1);
+  assert.deepEqual([...stillWaiting.keys()], ['front/front-main']);
+
+  const timedOut = prunePending(pending, OVERVIEW, 1000 + PENDING_TIMEOUT_MS);
+  assert.deepEqual([...timedOut.keys()], []);
+});
+
+test('prunePending: keeps an entry that is neither observed running nor timed out, and returns a fresh Map rather than mutating the input', () => {
+  const pending = new Map([['front/front-main', 1000]]);
+  const result = prunePending(pending, OVERVIEW, 1500);
+
+  assert.deepEqual([...result.keys()], ['front/front-main']);
+  assert.notEqual(result, pending);
+  assert.deepEqual([...pending.keys()], ['front/front-main'], 'the input map must not be mutated');
+});
+
+test('prunePending: independently resolves multiple entries in a single call', () => {
+  const pending = new Map([
+    ['api/api-main', 1000], // observed running -> dropped.
+    ['api', 1000], // observed running -> dropped.
+    ['front/front-main', 1000], // neither -> kept (not timed out yet).
+    ['front', 1000 - PENDING_TIMEOUT_MS], // not observed, already past the timeout -> dropped.
+  ]);
+
+  const result = prunePending(pending, OVERVIEW, 1000);
+
+  assert.deepEqual([...result.keys()], ['front/front-main']);
 });

@@ -3,13 +3,29 @@ import { loadConfig } from '../config.ts';
 import { allocatePort, findPortOccupant } from '../ports.ts';
 import { applyPortRefs, parsePortRefs, resolvePortRef } from '../portRefs.ts';
 import { cwdActiveMismatchWarning, resolveRepo, listWorktrees, findWorktree } from '../repo.ts';
-import { ensureRepoState, readState, withState } from '../state.ts';
+import { ensureRepoState, readState, withState, type ServerEntry } from '../state.ts';
 
 const EARLY_EXIT_THRESHOLD_MS = 2000;
 
 export interface ServeArgs {
   repo?: string;
+  /**
+   * Binds the repo's `fixed_port` directly instead of allocating/reusing a
+   * sticky worktree port: a one-off substitution of `fixed_port` for
+   * `{port}`, for running this worktree unproxied, the way it'd look bound
+   * on the fixed port in production. The sticky ports map (`state`'s
+   * per-worktree assignments) is left completely untouched -- this never
+   * allocates, records, or overwrites a sticky port. The server entry this
+   * records still carries `fixed_port` as its `port`, so `wtshunt
+   * status`/`wtshunt ui` show it exactly like any other running server.
+   */
+  direct?: boolean;
 }
+
+/** What either allocation path (sticky or `--direct`) hands off to the shared spawn logic below. */
+type Allocation =
+  | { alreadyRunning: true; entry: ServerEntry }
+  | { alreadyRunning: false; port: number; resolvedRefs: Record<string, number> };
 
 export async function serveCommand(args: ServeArgs): Promise<void> {
   const config = await loadConfig();
@@ -39,26 +55,71 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     throw new Error(`Worktree "${targetName}" not found in repo "${repoName}".`);
   }
 
-  const allocation = await withState(async (s) => {
-    const rs = ensureRepoState(s, repoName);
-    const existing = rs.servers[targetName];
-    if (existing) {
-      return { alreadyRunning: true as const, entry: existing };
+  let allocation: Allocation;
+
+  if (args.direct) {
+    // Guard (a): the proxy already owns fixed_port -- starting here too
+    // would fight it for the same port, so refuse outright with a clear
+    // error rather than racing it.
+    const proxy = state.repos[repoName]?.proxy;
+    if (proxy) {
+      throw new Error(
+        `Proxy for "${repoName}" is running on port ${repoConfig.fixedPort} (pid ${proxy.pid}). ` +
+          `Stop "wtshunt proxy" first, then retry "wtshunt serve ${repoName}/${targetName} --direct".`
+      );
     }
 
-    const port = await allocatePort({ worktree: targetName, portRange: repoConfig.portRange, stickyPorts: rs.ports });
-    rs.ports[targetName] = port;
-
-    // {<repo>.port} references resolve inside this same transaction, so a
-    // referenced repo's port allocation and this server's own land in one
-    // atomic write together.
-    const resolvedRefs: Record<string, number> = {};
-    for (const refRepoName of parsePortRefs(repoConfig.serve)) {
-      resolvedRefs[refRepoName] = await resolvePortRef(config, s, refRepoName);
+    // Guard (b): same lsof-based occupant check "wtshunt proxy" itself runs
+    // before binding fixed_port.
+    const occupant = await findPortOccupant(repoConfig.fixedPort);
+    if (occupant) {
+      console.error(
+        `Port ${repoConfig.fixedPort} is already in use:\n${occupant}\n\n` +
+          `Stop that process first, or check "wtshunt status" to see what's using it.`
+      );
+      process.exitCode = 1;
+      return;
     }
 
-    return { alreadyRunning: false as const, port, resolvedRefs };
-  });
+    allocation = await withState(async (s) => {
+      const rs = ensureRepoState(s, repoName);
+      const existing = rs.servers[targetName];
+      if (existing) {
+        return { alreadyRunning: true as const, entry: existing };
+      }
+
+      // {<repo>.port} references still resolve normally -- only this
+      // server's own {port} placeholder is overridden below. The sticky
+      // ports map (rs.ports) is deliberately never touched here.
+      const resolvedRefs: Record<string, number> = {};
+      for (const refRepoName of parsePortRefs(repoConfig.serve)) {
+        resolvedRefs[refRepoName] = await resolvePortRef(config, s, refRepoName);
+      }
+
+      return { alreadyRunning: false as const, port: repoConfig.fixedPort, resolvedRefs };
+    });
+  } else {
+    allocation = await withState(async (s) => {
+      const rs = ensureRepoState(s, repoName);
+      const existing = rs.servers[targetName];
+      if (existing) {
+        return { alreadyRunning: true as const, entry: existing };
+      }
+
+      const port = await allocatePort({ worktree: targetName, portRange: repoConfig.portRange, stickyPorts: rs.ports });
+      rs.ports[targetName] = port;
+
+      // {<repo>.port} references resolve inside this same transaction, so a
+      // referenced repo's port allocation and this server's own land in one
+      // atomic write together.
+      const resolvedRefs: Record<string, number> = {};
+      for (const refRepoName of parsePortRefs(repoConfig.serve)) {
+        resolvedRefs[refRepoName] = await resolvePortRef(config, s, refRepoName);
+      }
+
+      return { alreadyRunning: false as const, port, resolvedRefs };
+    });
+  }
 
   if (allocation.alreadyRunning) {
     console.log(
@@ -72,7 +133,11 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   // placeholder (see portRefs.ts for why the two can't collide).
   const serveCmd = applyPortRefs(repoConfig.serve, resolvedRefs).replaceAll('{port}', String(port));
 
-  console.log(`Starting server for "${targetName}" on port ${port}...`);
+  console.log(
+    args.direct
+      ? `Starting server for "${targetName}" directly on fixed port ${port} (--direct)...`
+      : `Starting server for "${targetName}" on port ${port}...`
+  );
 
   const child = spawn('sh', ['-c', serveCmd], {
     cwd: worktree.path,

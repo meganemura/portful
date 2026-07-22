@@ -20,18 +20,34 @@ test('keyToAction: q and ctrl-c always quit, regardless of the selected row', ()
   assert.deepEqual(keyToAction(undefined, 'ctrl-c'), { type: 'quit' });
 });
 
-test('keyToAction: u/enter uses a worktree row or a task row, but not a repo header row', () => {
+test('keyToAction: u sets the active worktree on a worktree row, applies a task on a task row, but does nothing on a repo header row', () => {
   assert.deepEqual(keyToAction(WORKTREE_ROW, 'u'), { type: 'use-worktree', repo: 'api', worktree: 'api-main' });
-  assert.deepEqual(keyToAction(WORKTREE_ROW, 'return'), { type: 'use-worktree', repo: 'api', worktree: 'api-main' });
   assert.deepEqual(keyToAction(TASK_ROW, 'u'), { type: 'use-task', task: 'prod' });
   assert.deepEqual(keyToAction(REPO_ROW, 'u'), { type: 'none' });
 });
 
-test('keyToAction: s/x/r only act on worktree rows', () => {
+test('keyToAction: enter toggles a worktree row on/off depending on whether it already has a pid', () => {
+  assert.deepEqual(keyToAction(WORKTREE_ROW, 'return'), { type: 'serve', repo: 'api', worktree: 'api-main' });
+  const runningRow: UiRow = { ...WORKTREE_ROW, pid: 555 };
+  assert.deepEqual(keyToAction(runningRow, 'return'), { type: 'stop', repo: 'api', worktree: 'api-main' });
+});
+
+test('keyToAction: enter toggles the proxy on a repo header row, same as p', () => {
+  assert.deepEqual(keyToAction(REPO_ROW, 'return'), { type: 'toggle-proxy', repo: 'api' });
+});
+
+test('keyToAction: enter applies a task on a task row, same as u', () => {
+  assert.deepEqual(keyToAction(TASK_ROW, 'return'), { type: 'use-task', task: 'prod' });
+});
+
+test('keyToAction: s/d/x/r only act on worktree rows', () => {
   assert.deepEqual(keyToAction(WORKTREE_ROW, 's'), { type: 'serve', repo: 'api', worktree: 'api-main' });
+  assert.deepEqual(keyToAction(WORKTREE_ROW, 'd'), { type: 'direct', repo: 'api', worktree: 'api-main' });
   assert.deepEqual(keyToAction(WORKTREE_ROW, 'x'), { type: 'stop', repo: 'api', worktree: 'api-main' });
   assert.deepEqual(keyToAction(WORKTREE_ROW, 'r'), { type: 'restart', repo: 'api', worktree: 'api-main' });
   assert.deepEqual(keyToAction(REPO_ROW, 's'), { type: 'none' });
+  assert.deepEqual(keyToAction(REPO_ROW, 'd'), { type: 'none' });
+  assert.deepEqual(keyToAction(TASK_ROW, 'd'), { type: 'none' });
   assert.deepEqual(keyToAction(TASK_ROW, 'x'), { type: 'none' });
 });
 
@@ -48,17 +64,25 @@ test('keyToAction: an unmapped key with no row is a no-op', () => {
 
 test('invalidKeyHint: names the key, but not the row kind (that vocabulary is not shown anywhere on screen), when a known action key does not apply to the selected row', () => {
   assert.equal(invalidKeyHint(TASK_ROW, 's'), 'Key "s" isn\'t available on this row.');
+  assert.equal(invalidKeyHint(TASK_ROW, 'd'), 'Key "d" isn\'t available on this row.');
+  assert.equal(invalidKeyHint(REPO_ROW, 'd'), 'Key "d" isn\'t available on this row.');
   assert.equal(invalidKeyHint(REPO_ROW, 'x'), 'Key "x" isn\'t available on this row.');
   assert.equal(invalidKeyHint(REPO_ROW, 'r'), 'Key "r" isn\'t available on this row.');
   assert.equal(invalidKeyHint(TASK_ROW, 'p'), 'Key "p" isn\'t available on this row.');
   assert.equal(invalidKeyHint(REPO_ROW, 'u'), 'Key "u" isn\'t available on this row.');
-  assert.equal(invalidKeyHint(REPO_ROW, 'return'), 'Key "Enter" isn\'t available on this row.');
+});
+
+test('invalidKeyHint: enter is now valid on every row kind (it toggles per row kind instead of being a plain alias of u), so it is never flagged', () => {
+  assert.equal(invalidKeyHint(REPO_ROW, 'return'), '');
+  assert.equal(invalidKeyHint(WORKTREE_ROW, 'return'), '');
+  assert.equal(invalidKeyHint(TASK_ROW, 'return'), '');
 });
 
 test('invalidKeyHint: is empty for a key that is unbound entirely, a valid combination, or no selected row', () => {
   assert.equal(invalidKeyHint(TASK_ROW, 'g'), '');
   assert.equal(invalidKeyHint(WORKTREE_ROW, 'z'), '');
   assert.equal(invalidKeyHint(WORKTREE_ROW, 's'), '');
+  assert.equal(invalidKeyHint(WORKTREE_ROW, 'd'), '');
   assert.equal(invalidKeyHint(undefined, 's'), '');
 });
 
@@ -99,6 +123,10 @@ test('pendingMessage: one line per action, in the tone of the matching executeAc
   assert.equal(
     pendingMessage({ type: 'serve', repo: 'api', worktree: 'api-feature-x' }),
     'Opening serve for "api/api-feature-x"…'
+  );
+  assert.equal(
+    pendingMessage({ type: 'direct', repo: 'api', worktree: 'api-feature-x' }),
+    'Opening direct serve for "api/api-feature-x"…'
   );
   assert.equal(
     pendingMessage({ type: 'stop', repo: 'api', worktree: 'api-feature-x' }),
@@ -188,6 +216,155 @@ test('executeAction: serve via the fallback adapter reports guidance instead of 
   assert.equal(opened.length, 1);
   assert.match(message, /No multiplexer detected/);
   assert.doesNotMatch(message, /via fallback/);
+});
+
+test('executeAction: direct refuses to open a second pane when a server is already running', async () => {
+  const opened: { title: string; command: string; cwd?: string }[] = [];
+  const overview = makeOverview();
+  overview.repos[0].servers['api-main'] = { branch: 'main', port: 3101, pid: 555 };
+
+  const deps: ActionDeps = {
+    setActiveWorktree: async () => ({ hasServer: true, proxyActive: false }),
+    applyTask: async () => ({ members: {}, needsServe: [], proxying: [], mismatches: [] }),
+    stopServer: async () => ({ status: 'no-server' }),
+    mux: fakeMux('tmux', opened),
+  };
+
+  const message = await executeAction({ type: 'direct', repo: 'api', worktree: 'api-main' }, overview, deps);
+
+  assert.equal(opened.length, 0);
+  assert.match(message, /already running/);
+  assert.match(message, /555/);
+});
+
+test('executeAction: direct opens via the mux adapter with --direct in the command', async () => {
+  const opened: { title: string; command: string; cwd?: string }[] = [];
+  const deps: ActionDeps = {
+    setActiveWorktree: async () => ({ hasServer: true, proxyActive: false }),
+    applyTask: async () => ({ members: {}, needsServe: [], proxying: [], mismatches: [] }),
+    stopServer: async () => ({ status: 'no-server' }),
+    mux: fakeMux('tmux', opened),
+  };
+
+  const message = await executeAction({ type: 'direct', repo: 'api', worktree: 'api-main' }, makeOverview(), deps);
+
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].cwd, '/repos/api-main');
+  assert.match(opened[0].command, /serve/);
+  assert.match(opened[0].command, /api\/api-main/);
+  assert.match(opened[0].command, /--direct/);
+  assert.match(message, /Opened direct serve/);
+  assert.match(message, /via tmux/);
+});
+
+test('executeAction: direct via the fallback adapter reports guidance instead of "opened via fallback"', async () => {
+  const opened: { title: string; command: string; cwd?: string }[] = [];
+  const deps: ActionDeps = {
+    setActiveWorktree: async () => ({ hasServer: true, proxyActive: false }),
+    applyTask: async () => ({ members: {}, needsServe: [], proxying: [], mismatches: [] }),
+    stopServer: async () => ({ status: 'no-server' }),
+    mux: fakeMux('fallback', opened),
+  };
+
+  const message = await executeAction({ type: 'direct', repo: 'api', worktree: 'api-main' }, makeOverview(), deps);
+
+  assert.equal(opened.length, 1);
+  assert.match(message, /No multiplexer detected/);
+  assert.doesNotMatch(message, /via fallback/);
+});
+
+test('executeAction: onStart fires exactly when serve/direct actually opens a pane, not on a duplicate-guard refusal or the fallback adapter', async () => {
+  const baseDeps = {
+    setActiveWorktree: async () => ({ hasServer: true, proxyActive: false }),
+    applyTask: async () => ({ members: {}, needsServe: [], proxying: [], mismatches: [] }),
+    stopServer: async () => ({ status: 'no-server' as const }),
+  };
+
+  let started: string[] = [];
+  await executeAction(
+    { type: 'serve', repo: 'api', worktree: 'api-main' },
+    makeOverview(),
+    { ...baseDeps, mux: fakeMux('tmux', []), onStart: (key) => started.push(key) }
+  );
+  assert.deepEqual(started, ['api/api-main']);
+
+  started = [];
+  await executeAction(
+    { type: 'direct', repo: 'api', worktree: 'api-main' },
+    makeOverview(),
+    { ...baseDeps, mux: fakeMux('tmux', []), onStart: (key) => started.push(key) }
+  );
+  assert.deepEqual(started, ['api/api-main']);
+
+  started = [];
+  const runningOverview = makeOverview();
+  runningOverview.repos[0].servers['api-main'] = { branch: 'main', port: 3101, pid: 555 };
+  await executeAction(
+    { type: 'serve', repo: 'api', worktree: 'api-main' },
+    runningOverview,
+    { ...baseDeps, mux: fakeMux('tmux', []), onStart: (key) => started.push(key) }
+  );
+  assert.deepEqual(started, [], 'duplicate-guard refusal must not record a pending start');
+
+  started = [];
+  await executeAction(
+    { type: 'serve', repo: 'api', worktree: 'api-main' },
+    makeOverview(),
+    { ...baseDeps, mux: fakeMux('fallback', []), onStart: (key) => started.push(key) }
+  );
+  assert.deepEqual(started, [], 'the fallback adapter never actually starts anything on the user\'s behalf');
+});
+
+test('executeAction: onStart fires for a toggle-proxy start, but not for its stop branch or a restart whose stop timed out', async () => {
+  const baseDeps = {
+    setActiveWorktree: async () => ({ hasServer: true, proxyActive: false }),
+    applyTask: async () => ({ members: {}, needsServe: [], proxying: [], mismatches: [] }),
+    stopServer: async () => ({ status: 'no-server' as const }),
+  };
+
+  let started: string[] = [];
+  const overviewNoProxy = makeOverview();
+  delete overviewNoProxy.repos[0].proxy;
+  await executeAction(
+    { type: 'toggle-proxy', repo: 'api' },
+    overviewNoProxy,
+    { ...baseDeps, mux: fakeMux('tmux', []), onStart: (key) => started.push(key) }
+  );
+  assert.deepEqual(started, ['api']);
+
+  started = [];
+  await executeAction(
+    { type: 'toggle-proxy', repo: 'api' },
+    makeOverview(), // has a proxy running (pid 999) -- this takes the stop branch.
+    { ...baseDeps, mux: fakeMux('tmux', []), kill: () => {}, onStart: (key) => started.push(key) }
+  );
+  assert.deepEqual(started, [], 'stopping the proxy must not record a pending start');
+
+  started = [];
+  await executeAction(
+    { type: 'restart', repo: 'api', worktree: 'api-main' },
+    makeOverview(),
+    {
+      ...baseDeps,
+      stopServer: async () => ({ status: 'timeout' as const, pid: 7 }),
+      mux: fakeMux('tmux', []),
+      onStart: (key) => started.push(key),
+    }
+  );
+  assert.deepEqual(started, [], 'restart must not record a pending start when its stop phase timed out');
+
+  started = [];
+  await executeAction(
+    { type: 'restart', repo: 'api', worktree: 'api-main' },
+    makeOverview(),
+    {
+      ...baseDeps,
+      stopServer: async () => ({ status: 'stopped' as const, pid: 7 }),
+      mux: fakeMux('tmux', []),
+      onStart: (key) => started.push(key),
+    }
+  );
+  assert.deepEqual(started, ['api/api-main']);
 });
 
 test('executeAction: stop reports a timeout distinctly from a clean stop', async () => {

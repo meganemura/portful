@@ -126,3 +126,57 @@ export function repoPath(overview: Overview, repo: string): string | undefined {
 export function proxyPid(overview: Overview, repo: string): number | undefined {
   return findRepo(overview, repo)?.proxy?.pid;
 }
+
+/**
+ * How long `wtshunt ui` waits, after starting a server/proxy, for a later
+ * overview refresh to observe it actually running before giving up on the
+ * `◐` "starting up" indicator and falling back to the ordinary `●`/`○` one
+ * (see `prunePending`).
+ */
+export const PENDING_TIMEOUT_MS = 15000;
+
+/**
+ * Canonical key `wtshunt ui`'s in-process pending-indicator bookkeeping
+ * (and `renderLines`'s `pendingKeys` set) uses to identify a row: the bare
+ * repo name for a repo/proxy row, or `repo/worktree` for a worktree/server
+ * row. The two never collide -- a worktree name never contains `/` (it's a
+ * `basename()` of a filesystem path) -- so a single string namespace is
+ * enough for both row kinds.
+ */
+export function pendingKey(repo: string, worktree?: string): string {
+  return worktree === undefined ? repo : `${repo}/${worktree}`;
+}
+
+/** True once `overview` shows the row named by a `pendingKey()`-shaped `key` actually running. */
+function isObservedRunning(overview: Overview, key: string): boolean {
+  const slash = key.indexOf('/');
+  if (slash === -1) {
+    return proxyPid(overview, key) !== undefined;
+  }
+  return serverPid(overview, key.slice(0, slash), key.slice(slash + 1)) !== undefined;
+}
+
+/**
+ * Prunes a "row key -> start timestamp" pending map -- `wtshunt ui`'s own
+ * bookkeeping for the `◐` indicator -- against a fresh `overview` snapshot
+ * and the current time. An entry drops out once its row is observed
+ * running (the ◐ has done its job; the row's real pid/proxy state now
+ * renders `●` on its own) or once `PENDING_TIMEOUT_MS` has elapsed with no
+ * observed start (falls back to `○` -- a start failure is visible in the
+ * pane itself, so `wtshunt ui` just stops waiting rather than guessing
+ * why). Pure function of its inputs, so the transition logic is
+ * unit-testable without a real timer, process, or terminal.
+ */
+export function prunePending(pending: ReadonlyMap<string, number>, overview: Overview, now: number): Map<string, number> {
+  const next = new Map<string, number>();
+  for (const [key, startedAt] of pending) {
+    if (isObservedRunning(overview, key)) {
+      continue;
+    }
+    if (now - startedAt >= PENDING_TIMEOUT_MS) {
+      continue;
+    }
+    next.set(key, startedAt);
+  }
+  return next;
+}
