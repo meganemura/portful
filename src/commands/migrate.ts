@@ -1,6 +1,8 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { parse } from 'smol-toml';
-import { getConfigPath, getLegacyConfigPath, repoConfigPath } from '../config.ts';
+import { findLegacyConfigPath, getConfigPath, legacyConfigPaths, legacyStatePath, repoConfigPath } from '../config.ts';
+import { getStatePath } from '../state.ts';
 
 /**
  * Converts the TOML config this tool read before the move to JSON.
@@ -54,18 +56,14 @@ export function convertConfig(parsed: Record<string, unknown>): Record<string, u
 }
 
 export async function migrateCommand(args: MigrateArgs = {}): Promise<void> {
-  const legacyPath = getLegacyConfigPath();
+  const legacyPath = findLegacyConfigPath();
   const configPath = getConfigPath();
 
-  let raw: string;
-  try {
-    raw = await readFile(legacyPath, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`No TOML config to convert at ${legacyPath}.`);
-    }
-    throw err;
+  if (legacyPath === undefined) {
+    throw new Error(`No TOML config to convert. Looked in:\n${legacyConfigPaths().map((p) => `  ${p}`).join('\n')}`);
   }
+
+  const raw = await readFile(legacyPath, 'utf8');
 
   if (!args.force) {
     try {
@@ -89,11 +87,16 @@ export async function migrateCommand(args: MigrateArgs = {}): Promise<void> {
   }
 
   const converted = convertConfig(parsed as Record<string, unknown>);
+  // The target directory may not exist yet: a config written under the
+  // previous name lives in a different directory entirely.
+  await mkdir(dirname(configPath), { recursive: true });
   await writeFile(configPath, `${JSON.stringify(converted, null, 2)}\n`, 'utf8');
 
   const repoNames = Object.keys((converted.repos as Record<string, unknown>) ?? {});
   console.log(`Converted ${legacyPath} to ${configPath}.`);
   console.log(`Repos carried over: ${repoNames.length > 0 ? repoNames.join(', ') : '(none)'}`);
+  await carryStateAcross();
+
   console.log('');
   console.log('The old TOML file is left in place. Delete it once the new config works.');
   if (repoNames.length > 0) {
@@ -104,4 +107,32 @@ export async function migrateCommand(args: MigrateArgs = {}): Promise<void> {
         `for example ${repoConfigPath(examplePath)}, so contributors get them from the checkout.`
     );
   }
+}
+
+/**
+ * Copies the state file written under the previous name, when this tool has
+ * none of its own yet. Sticky port assignments would otherwise be handed out
+ * again from scratch, and task definitions would be lost outright.
+ */
+async function carryStateAcross(): Promise<void> {
+  const target = getStatePath();
+  try {
+    await readFile(target, 'utf8');
+    return; // Already has its own state; leave it alone.
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw err;
+    }
+  }
+
+  let previous: string;
+  try {
+    previous = await readFile(legacyStatePath(), 'utf8');
+  } catch {
+    return; // Nothing to carry across.
+  }
+
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, previous, 'utf8');
+  console.log(`Carried the state file across from ${legacyStatePath()} to ${target}.`);
 }

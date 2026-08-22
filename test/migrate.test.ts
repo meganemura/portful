@@ -105,6 +105,34 @@ test('migrate: refuses to overwrite an existing config.json unless --force is gi
   });
 });
 
+test('migrate: finds a TOML config left under the previous name', async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), 'portful-migrate-prev-'));
+  const stateRoot = await mkdtemp(join(tmpdir(), 'portful-migrate-prev-state-'));
+  try {
+    await mkdir(join(configRoot, 'wtshunt'), { recursive: true });
+    await writeFile(join(configRoot, 'wtshunt', 'config.toml'), LEGACY);
+    await mkdir(join(stateRoot, 'wtshunt'), { recursive: true });
+    await writeFile(join(stateRoot, 'wtshunt', 'state.json'), JSON.stringify({ repos: { api: { ports: { main: 3101 }, servers: {} } }, tasks: { t: { members: { api: 'main' } } } }));
+
+    const env = { ...process.env, XDG_CONFIG_HOME: configRoot, XDG_STATE_HOME: stateRoot };
+    const { stdout } = await execFileAsync(process.execPath, [binPath, 'migrate'], { env });
+    assert.match(stdout, /wtshunt\/config\.toml to .*portful\/config\.json/);
+    assert.match(stdout, /Carried the state file across/);
+
+    const written = JSON.parse(await readFile(join(configRoot, 'portful', 'config.json'), 'utf8'));
+    assert.equal(written.repos.api.fixedPort, 3000);
+
+    // Sticky ports and tasks come across, so nothing is handed out again from
+    // scratch and no task definition is lost.
+    const state = JSON.parse(await readFile(join(stateRoot, 'portful', 'state.json'), 'utf8'));
+    assert.equal(state.repos.api.ports.main, 3101);
+    assert.deepEqual(state.tasks.t.members, { api: 'main' });
+  } finally {
+    await rm(configRoot, { recursive: true, force: true });
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});
+
 test('migrate: with no TOML config to read, says so instead of writing an empty file', async () => {
   const configRoot = await mkdtemp(join(tmpdir(), 'portful-migrate-none-'));
   try {
@@ -113,6 +141,7 @@ test('migrate: with no TOML config to read, says so instead of writing an empty 
       () => execFileAsync(process.execPath, [binPath, 'migrate'], { env: { ...process.env, XDG_CONFIG_HOME: configRoot } }),
       (err: NodeJS.ErrnoException & { stderr?: string }) => {
         assert.match(String(err.stderr), /No TOML config to convert/);
+        assert.match(String(err.stderr), /wtshunt\/config\.toml/, 'the previous name should be listed among the places checked');
         return true;
       }
     );

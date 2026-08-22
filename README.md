@@ -198,7 +198,9 @@ portless. Your machine beats the repo's suggestion, because ports are
 allocated per machine.
 
 Converting a config from before this layout: `portful migrate` reads the
-old `config.toml` and writes `config.json`.
+old `config.toml` and writes `config.json`. It looks under the previous
+name (`~/.config/wtshunt/config.toml`) too, and carries that state file
+across so sticky ports and task definitions survive.
 
 ### Keys
 
