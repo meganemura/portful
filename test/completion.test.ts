@@ -107,6 +107,8 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'doctor',
       'help',
       'completion',
+      // A repo name is a valid first word too, via the `<repo> <cmd...>` form.
+      'b',
     ]);
 
     // "portful use <Tab>": rest = [portful, use], COMP_CWORD=2. First-argument
@@ -146,6 +148,8 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
       'doctor',
       'help',
       'completion',
+      // A repo name is a valid first word too, via the `<repo> <cmd...>` form.
+      'b',
     ]);
 
     // "portful use <Tab>": rest = [portful, use, ''], COMP_CWORD=2.

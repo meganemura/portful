@@ -20,6 +20,15 @@ export interface ServeArgs {
    * status`/`portful ui` show it exactly like any other running server.
    */
   direct?: boolean;
+  /**
+   * An explicit command, from the `portful <repo> <cmd...>` form, replacing
+   * the repo's `serve` template. portless starts an app this way, so a
+   * developer coming from portless can start a worktree server without
+   * writing a template first. The command is spawned directly rather than
+   * through `sh -c`, so its arguments reach it exactly as typed, and it
+   * reads its port from `PORT` rather than from a `{port}` substitution.
+   */
+  command?: string[];
 }
 
 /** What either allocation path (sticky or `--direct`) hands off to the shared spawn logic below. */
@@ -54,6 +63,10 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   if (!worktree) {
     throw new Error(`Worktree "${targetName}" not found in repo "${repoName}".`);
   }
+
+  // An explicit command carries no `{<repo>.port}` references to resolve,
+  // since those live in the template it replaces.
+  const refTemplate = args.command ? '' : repoConfig.serve;
 
   let allocation: Allocation;
 
@@ -92,7 +105,7 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
       // server's own {port} placeholder is overridden below. The sticky
       // ports map (rs.ports) is deliberately never touched here.
       const resolvedRefs: Record<string, number> = {};
-      for (const refRepoName of parsePortRefs(repoConfig.serve)) {
+      for (const refRepoName of parsePortRefs(refTemplate)) {
         resolvedRefs[refRepoName] = await resolvePortRef(config, s, refRepoName);
       }
 
@@ -113,7 +126,7 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
       // referenced repo's port allocation and this server's own land in one
       // atomic write together.
       const resolvedRefs: Record<string, number> = {};
-      for (const refRepoName of parsePortRefs(repoConfig.serve)) {
+      for (const refRepoName of parsePortRefs(refTemplate)) {
         resolvedRefs[refRepoName] = await resolvePortRef(config, s, refRepoName);
       }
 
@@ -129,9 +142,6 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   }
 
   const { port, resolvedRefs } = allocation;
-  // {<repo>.port} references are substituted before the plain {port}
-  // placeholder (see portRefs.ts for why the two can't collide).
-  const serveCmd = applyPortRefs(repoConfig.serve, resolvedRefs).replaceAll('{port}', String(port));
 
   console.log(
     args.direct
@@ -139,11 +149,39 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
       : `Starting server for "${targetName}" on port ${port}...`
   );
 
-  const child = spawn('sh', ['-c', serveCmd], {
-    cwd: worktree.path,
-    stdio: 'inherit',
-    detached: true,
-  });
+  // PORT reaches the child on both paths. A template puts the port on the
+  // command line, and a server that reads PORT instead needs no template at
+  // all. PORTFUL_URL is the address clients keep using, which is the fixed
+  // port rather than this worktree's own.
+  const childEnv = {
+    ...process.env,
+    PORT: String(port),
+    HOST: '127.0.0.1',
+    PORTFUL_URL: `${repoConfig.https?.cert ? 'https' : 'http'}://127.0.0.1:${repoConfig.fixedPort}`,
+  };
+
+  const child = args.command
+    ? spawn(args.command[0], args.command.slice(1), {
+        cwd: worktree.path,
+        stdio: 'inherit',
+        detached: true,
+        env: childEnv,
+      })
+    : spawn(
+        'sh',
+        [
+          '-c',
+          // {<repo>.port} references are substituted before the plain {port}
+          // placeholder (see portRefs.ts for why the two can't collide).
+          applyPortRefs(repoConfig.serve, resolvedRefs).replaceAll('{port}', String(port)),
+        ],
+        {
+          cwd: worktree.path,
+          stdio: 'inherit',
+          detached: true,
+          env: childEnv,
+        }
+      );
 
   const pid = child.pid;
   if (pid === undefined) {

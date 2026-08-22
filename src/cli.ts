@@ -1,4 +1,5 @@
 import yargs, { type Argv } from 'yargs';
+import { COMMAND_NAMES, explicitCommandForm } from './dispatch.ts';
 import { hideBin } from 'yargs/helpers';
 import { loadConfig } from './config.ts';
 import { listWorktrees } from './repo.ts';
@@ -214,23 +215,6 @@ const repoPositional = (y: Argv) =>
     type: 'string',
     describe: 'repo, or repo/worktree to target directly',
   });
-
-const COMMAND_NAMES = [
-  'use',
-  'serve',
-  'exec',
-  'status',
-  'list',
-  'stop',
-  'proxy',
-  'task',
-  'ui',
-  'whoami',
-  'prune',
-  'doctor',
-  'help',
-  'completion',
-];
 
 /** Commands whose first argument is a `repo` or `repo/worktree` name. */
 const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'exec']);
@@ -516,7 +500,10 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       const startsWithCurrent = (name: string) => name.startsWith(current);
 
       if (positionals.length === 0) {
-        return COMMAND_NAMES.filter(startsWithCurrent);
+        // A repo name is a valid first word too (the `<repo> <cmd...>` form),
+        // so both sets are offered rather than commands alone.
+        const repos = await repoNamesOnly();
+        return [...COMMAND_NAMES, ...repos].filter(startsWithCurrent);
       }
 
       const command = positionals[0];
@@ -601,4 +588,14 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
     .help();
 }
 
-await buildCli().parse();
+const entryArgs = hideBin(process.argv);
+const explicit = explicitCommandForm(entryArgs);
+if (explicit) {
+  try {
+    await serveCommand({ repo: explicit.repo, command: explicit.command });
+  } catch (err) {
+    reportError(err);
+  }
+} else {
+  await buildCli().parse();
+}
