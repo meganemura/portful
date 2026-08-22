@@ -38,10 +38,17 @@ async function makeFixture(): Promise<Fixture> {
   const configDir = await mkdtemp(join(tmpdir(), 'portful-overview-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.api]', `path = "${apiMain}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: `${apiMain}`,
+          fixedPort: 3000,
+          portRange: [3101, 3199],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
 
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-overview-state-'));

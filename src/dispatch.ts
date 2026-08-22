@@ -18,6 +18,7 @@ export const COMMAND_NAMES = [
   'whoami',
   'prune',
   'doctor',
+  'migrate',
   'help',
   'completion',
 ];

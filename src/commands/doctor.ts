@@ -93,7 +93,7 @@ export async function doctorCommand(): Promise<void> {
         hasProblem = true;
       }
       lines.push(
-        `  ${name} fixed_port ${repoConfig.fixedPort}: ${fixedListening ? 'listening' : 'not listening'}, ` +
+        `  ${name} fixedPort ${repoConfig.fixedPort}: ${fixedListening ? 'listening' : 'not listening'}, ` +
           `proxy ${proxyRunning ? 'running' : 'not running'} in state -- ` +
           `${fixedStatus === 'match' ? 'OK' : 'MISMATCH'}`
       );

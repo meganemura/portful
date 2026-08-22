@@ -16,6 +16,7 @@ import { uiCommand } from './commands/ui.ts';
 import { whoamiCommand } from './commands/whoami.ts';
 import { pruneCommand } from './commands/prune.ts';
 import { doctorCommand } from './commands/doctor.ts';
+import { migrateCommand } from './commands/migrate.ts';
 import { formatVersionString, readCommitHash, readPackageVersion, resolveRepoRootFromBin } from './version.ts';
 
 /**
@@ -266,8 +267,8 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
           type: 'boolean',
           default: false,
           describe:
-            'Bind the fixed_port directly instead of the sticky worktree port (a one-off substitution; ' +
-            'refuses if the proxy is running or fixed_port is occupied)',
+            'Bind the fixedPort directly instead of the sticky worktree port (a one-off substitution; ' +
+            'refuses if the proxy is running or fixedPort is occupied)',
         }),
       handle(async (argv) => {
         await serveCommand({ repo: argv.repo as string | undefined, direct: argv.direct as boolean });
@@ -442,6 +443,19 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       () => {},
       handle(async () => {
         await doctorCommand();
+      })
+    )
+    .command(
+      'migrate',
+      'Convert a pre-JSON config.toml into config.json',
+      (y) =>
+        y.option('force', {
+          type: 'boolean',
+          default: false,
+          describe: 'Overwrite an existing config.json',
+        }),
+      handle(async (argv) => {
+        await migrateCommand({ force: argv.force as boolean });
       })
     )
     .command(

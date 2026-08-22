@@ -18,10 +18,17 @@ async function makeConfigDir(): Promise<string> {
   const configDir = await mkdtemp(join(tmpdir(), 'portful-stop-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.b]', 'path = "/tmp"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        b: {
+          path: '/tmp',
+          fixedPort: 3000,
+          portRange: [3101, 3199],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
   return configDir;
 }

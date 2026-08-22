@@ -44,7 +44,7 @@ function formatRow(row: UiRow, pendingKeys: ReadonlySet<string>): string {
     // no active worktree set means the proxy has nowhere to send it yet.
     const arrow = row.proxyRunning && row.activeWorktree !== undefined ? ` → ${row.activeWorktree}` : '';
     const proxyText = row.proxyRunning ? `proxy: running (pid ${row.proxyPid})${arrow}` : 'proxy: stopped';
-    return `${indicator} ${row.repo}  fixed_port=${row.fixedPort}  ${proxyText}`;
+    return `${indicator} ${row.repo}  fixedPort=${row.fixedPort}  ${proxyText}`;
   }
 
   if (row.kind === 'worktree') {

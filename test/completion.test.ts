@@ -32,10 +32,17 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
   const configDir = await mkdtemp(join(tmpdir(), 'portful-completion-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        b: {
+          path: `${main}`,
+          fixedPort: 3000,
+          portRange: [3101, 3199],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
 
   return { base, configDir };
@@ -105,6 +112,7 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'whoami',
       'prune',
       'doctor',
+      'migrate',
       'help',
       'completion',
       // A repo name is a valid first word too, via the `<repo> <cmd...>` form.
@@ -146,6 +154,7 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
       'whoami',
       'prune',
       'doctor',
+      'migrate',
       'help',
       'completion',
       // A repo name is a valid first word too, via the `<repo> <cmd...>` form.
@@ -277,6 +286,7 @@ test('completion: after "help", suggests command names (excluding help itself)',
       'whoami',
       'prune',
       'doctor',
+      'migrate',
       'completion',
     ]);
   } finally {

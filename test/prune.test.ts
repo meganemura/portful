@@ -132,21 +132,23 @@ async function makeFixture(): Promise<Fixture> {
   const configDir = await mkdtemp(join(tmpdir(), 'portful-prune-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    [
-      '[repos.api]',
-      `path = "${apiMain}"`,
-      'fixed_port = 3000',
-      'port_range = [3101, 3199]',
-      'serve = "echo {port}"',
-      '',
-      '[repos.front]',
-      `path = "${frontMain}"`,
-      'fixed_port = 8080',
-      'port_range = [8101, 8199]',
-      'serve = "echo {port}"',
-      '',
-    ].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: `${apiMain}`,
+          fixedPort: 3000,
+          portRange: [3101, 3199],
+          serve: 'echo {port}'
+        },
+        front: {
+          path: `${frontMain}`,
+          fixedPort: 8080,
+          portRange: [8101, 8199],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
 
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-prune-state-'));

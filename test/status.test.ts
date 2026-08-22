@@ -53,10 +53,17 @@ test('status --json: prints an Overview JSON shape reflecting active worktree an
   const configDir = await mkdtemp(join(tmpdir(), 'portful-status-json-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.api]', `path = "${apiMain}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: `${apiMain}`,
+          fixedPort: 3000,
+          portRange: [3101, 3199],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
 
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-json-state-'));
@@ -99,10 +106,17 @@ test('status (human-readable, default) output is unchanged by the --json additio
   const configDir = await mkdtemp(join(tmpdir(), 'portful-status-text-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.api]', 'path = "/tmp"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: '/tmp',
+          fixedPort: 3000,
+          portRange: [3101, 3199],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-text-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
@@ -146,21 +160,23 @@ test('status --json / status: staleWiring appears once a referenced repo moves i
   const configDir = await mkdtemp(join(tmpdir(), 'portful-status-stale-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    [
-      '[repos.api]',
-      `path = "${apiMain}"`,
-      'fixed_port = 3000',
-      'port_range = [41900, 41910]',
-      'serve = "echo {port}; sleep 30"',
-      '',
-      '[repos.front]',
-      `path = "${frontMain}"`,
-      'fixed_port = 8080',
-      'port_range = [42000, 42010]',
-      'serve = "echo {port}-api-at-{api.port}; sleep 30"',
-      '',
-    ].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: `${apiMain}`,
+          fixedPort: 3000,
+          portRange: [41900, 41910],
+          serve: 'echo {port}; sleep 30'
+        },
+        front: {
+          path: `${frontMain}`,
+          fixedPort: 8080,
+          portRange: [42000, 42010],
+          serve: 'echo {port}-api-at-{api.port}; sleep 30'
+        }
+      }
+    })
   );
 
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-stale-state-'));
@@ -235,10 +251,17 @@ test('status --json / status: marks a server whose worktree no longer exists, an
   const configDir = await mkdtemp(join(tmpdir(), 'portful-status-gone-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.api]', `path = "${apiMain}"`, 'fixed_port = 3000', 'port_range = [42100, 42110]', 'serve = "echo {port}"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: `${apiMain}`,
+          fixedPort: 3000,
+          portRange: [42100, 42110],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
 
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-gone-state-'));

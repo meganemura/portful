@@ -49,15 +49,17 @@ async function makeFixture(slug: string, fixedPort: number) {
   const configDir = await mkdtemp(join(tmpdir(), `portful-${slug}-config-`));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    [
-      '[repos.e]',
-      `path = "${main}"`,
-      `fixed_port = ${fixedPort}`,
-      `port_range = [${fixedPort + 1}, ${fixedPort + 10}]`,
-      'serve = "echo {port}; sleep 30"',
-      '',
-    ].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        e: {
+          path: `${main}`,
+          fixedPort: fixedPort,
+          portRange: [fixedPort + 1, fixedPort + 10],
+          serve: 'echo {port}; sleep 30'
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), `portful-${slug}-state-`));
 

@@ -10,13 +10,13 @@ const EARLY_EXIT_THRESHOLD_MS = 2000;
 export interface ServeArgs {
   repo?: string;
   /**
-   * Binds the repo's `fixed_port` directly instead of allocating/reusing a
-   * sticky worktree port: a one-off substitution of `fixed_port` for
+   * Binds the repo's `fixedPort` directly instead of allocating/reusing a
+   * sticky worktree port: a one-off substitution of `fixedPort` for
    * `{port}`, for running this worktree unproxied, the way it'd look bound
    * on the fixed port in production. The sticky ports map (`state`'s
    * per-worktree assignments) is left completely untouched -- this never
    * allocates, records, or overwrites a sticky port. The server entry this
-   * records still carries `fixed_port` as its `port`, so `portful
+   * records still carries `fixedPort` as its `port`, so `portful
    * status`/`portful ui` show it exactly like any other running server.
    */
   direct?: boolean;
@@ -64,14 +64,22 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     throw new Error(`Worktree "${targetName}" not found in repo "${repoName}".`);
   }
 
-  // An explicit command carries no `{<repo>.port}` references to resolve,
-  // since those live in the template it replaces.
-  const refTemplate = args.command ? '' : repoConfig.serve;
+  // An explicit command replaces the template outright, so it also carries
+  // no `{<repo>.port}` references to resolve.
+  const template = args.command ? undefined : repoConfig.serve;
+  if (args.command === undefined && template === undefined) {
+    throw new Error(
+      `Repo "${repoName}" has no "serve" command configured. Either add one to ` +
+        `${repoConfig.path}/portful.json, or pass the command directly: ` +
+        `portful ${repoName}/${targetName} <cmd...>`
+    );
+  }
+  const refTemplate = template ?? '';
 
   let allocation: Allocation;
 
   if (args.direct) {
-    // Guard (a): the proxy already owns fixed_port -- starting here too
+    // Guard (a): the proxy already owns fixedPort -- starting here too
     // would fight it for the same port, so refuse outright with a clear
     // error rather than racing it.
     const proxy = state.repos[repoName]?.proxy;
@@ -83,7 +91,7 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     }
 
     // Guard (b): same lsof-based occupant check "portful proxy start" itself runs
-    // before binding fixed_port.
+    // before binding fixedPort.
     const occupant = await findPortOccupant(repoConfig.fixedPort);
     if (occupant) {
       console.error(
@@ -173,7 +181,7 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
           '-c',
           // {<repo>.port} references are substituted before the plain {port}
           // placeholder (see portRefs.ts for why the two can't collide).
-          applyPortRefs(repoConfig.serve, resolvedRefs).replaceAll('{port}', String(port)),
+          applyPortRefs(template!, resolvedRefs).replaceAll('{port}', String(port)),
         ],
         {
           cwd: worktree.path,

@@ -39,15 +39,17 @@ async function makeFixture(fixedPort = 3000, portRange: [number, number] = [3101
   const configDir = await mkdtemp(join(tmpdir(), 'portful-doctor-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    [
-      '[repos.api]',
-      `path = "${apiMain}"`,
-      `fixed_port = ${fixedPort}`,
-      `port_range = [${portRange[0]}, ${portRange[1]}]`,
-      'serve = "echo {port}"',
-      '',
-    ].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: `${apiMain}`,
+          fixedPort: fixedPort,
+          portRange: [portRange[0], portRange[1]],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
 
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-doctor-state-'));
@@ -91,7 +93,7 @@ test('doctor: a healthy fixture prints every section and exits 0', async () => {
     assert.match(stdout, /loads OK/);
     assert.match(stdout, /repos\.api: OK, 1 worktree\(s\)/);
     assert.match(stdout, /^Ports:/m);
-    assert.match(stdout, /fixed_port 3000: not listening.*-- OK/);
+    assert.match(stdout, /fixedPort 3000: not listening.*-- OK/);
     assert.match(stdout, /^State: /m);
     assert.match(stdout, /no stale entries/);
     assert.match(stdout, /^Environment:/m);
@@ -159,12 +161,12 @@ test('doctor: exits 1 on a port mismatch — something listening that state does
       server!.listen({ port: fixedPort, host: '127.0.0.1' }, () => resolvePromise());
     });
 
-    // No proxy recorded in state, yet something is listening on fixed_port.
+    // No proxy recorded in state, yet something is listening on fixedPort.
     await assert.rejects(
       () => execFileAsync(process.execPath, [binPath, 'doctor'], { env: envFor(fixture) }),
       (err: NodeJS.ErrnoException & { code?: number; stdout?: string }) => {
         assert.equal(err.code, 1);
-        assert.match(String(err.stdout), new RegExp(`fixed_port ${fixedPort}: listening.*-- MISMATCH`));
+        assert.match(String(err.stdout), new RegExp(`fixedPort ${fixedPort}: listening.*-- MISMATCH`));
         return true;
       }
     );

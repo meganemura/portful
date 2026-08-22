@@ -31,10 +31,17 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
   const configDir = await mkdtemp(join(tmpdir(), 'portful-exec-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        b: {
+          path: `${main}`,
+          fixedPort: 3000,
+          portRange: [3101, 3199],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
 
   return { base, configDir };

@@ -63,8 +63,17 @@ test('portful <repo> <cmd...>: runs the command in the worktree with PORT set to
   const configDir = await mkdtemp(join(tmpdir(), 'portful-explicit-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.e]', `path = "${main}"`, 'fixed_port = 42010', 'port_range = [42011, 42020]', 'serve = "echo {port}"', ''].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        e: {
+          path: `${main}`,
+          fixedPort: 42010,
+          portRange: [42011, 42020],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-explicit-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
@@ -94,8 +103,17 @@ test('portful <unknown repo> <cmd...>: reports the unknown repo rather than runn
   const configDir = await mkdtemp(join(tmpdir(), 'portful-explicit-unknown-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.e]', 'path = "/nonexistent"', 'fixed_port = 42030', 'port_range = [42031, 42040]', 'serve = "echo {port}"', ''].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        e: {
+          path: '/nonexistent',
+          fixedPort: 42030,
+          portRange: [42031, 42040],
+          serve: 'echo {port}'
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-explicit-unknown-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };

@@ -41,20 +41,17 @@ test('resolvePickerKind: works with no config at all, not just an empty one', as
   assert.equal(kind, 'fzf');
 });
 
-async function withConfig<T>(pickerTomlLines: string[], fn: () => Promise<T>): Promise<T> {
+async function withConfig<T>(picker: { command?: string } | undefined, fn: () => Promise<T>): Promise<T> {
   const configDir = await mkdtemp(join(tmpdir(), 'portful-picker-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    [
-      '[repos.b]',
-      'path = "/tmp/b"',
-      'fixed_port = 3000',
-      'port_range = [3101, 3199]',
-      'serve = "echo {port}"',
-      '',
-      ...pickerTomlLines,
-    ].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        b: { path: '/tmp/b', fixedPort: 3000, portRange: [3101, 3199], serve: 'echo {port}' },
+      },
+      ...(picker ? { picker } : {}),
+    })
   );
 
   const original = process.env.XDG_CONFIG_HOME;
@@ -77,14 +74,14 @@ const CANDIDATES = [
 ];
 
 test('pickOne: an external [picker] command receives candidates via stdin and returns the selected value', async () => {
-  await withConfig(['[picker]', 'command = "head -n 1"', ''], async () => {
+  await withConfig({ command: 'head -n 1' }, async () => {
     const chosen = await pickOne(CANDIDATES);
     assert.equal(chosen, 'main');
   });
 });
 
 test('pickOne: a non-zero exit from the [picker] command is treated as a cancellation', async () => {
-  await withConfig(['[picker]', 'command = "false"', ''], async () => {
+  await withConfig({ command: 'false' }, async () => {
     const chosen = await pickOne(CANDIDATES);
     assert.equal(chosen, undefined);
   });
@@ -93,14 +90,14 @@ test('pickOne: a non-zero exit from the [picker] command is treated as a cancell
 test('pickOne: empty output from the [picker] command is treated as a cancellation', async () => {
   // Exits 0 but never prints anything — the empty-output half of the
   // cancellation check, distinct from the non-zero-exit half above.
-  await withConfig(['[picker]', 'command = "true"', ''], async () => {
+  await withConfig({ command: 'true' }, async () => {
     const chosen = await pickOne(CANDIDATES);
     assert.equal(chosen, undefined);
   });
 });
 
 test('pickOne: with no [picker] section, falls through to auto-detection (no candidates returns undefined regardless)', async () => {
-  await withConfig([], async () => {
+  await withConfig(undefined, async () => {
     const chosen = await pickOne([]);
     assert.equal(chosen, undefined);
   });

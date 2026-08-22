@@ -72,21 +72,23 @@ test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs o
   const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-refs-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    [
-      '[repos.api]',
-      `path = "${apiMain}"`,
-      'fixed_port = 3000',
-      'port_range = [41500, 41510]',
-      'serve = "echo api-on-{port}; sleep 30"',
-      '',
-      '[repos.front]',
-      `path = "${frontMain}"`,
-      'fixed_port = 8080',
-      'port_range = [41600, 41610]',
-      'serve = "echo front-on-{port}-api-at-{api.port}; sleep 30"',
-      '',
-    ].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        api: {
+          path: `${apiMain}`,
+          fixedPort: 3000,
+          portRange: [41500, 41510],
+          serve: 'echo api-on-{port}; sleep 30'
+        },
+        front: {
+          path: `${frontMain}`,
+          fixedPort: 8080,
+          portRange: [41600, 41610],
+          serve: 'echo front-on-{port}-api-at-{api.port}; sleep 30'
+        }
+      }
+    })
   );
 
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-refs-state-'));
@@ -149,10 +151,17 @@ test('serve: warns on stderr when cwd is in a different worktree than active, gi
   const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-warn-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [41700, 41710]', 'serve = "echo {port}; sleep 30"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        b: {
+          path: `${main}`,
+          fixedPort: 3000,
+          portRange: [41700, 41710],
+          serve: 'echo {port}; sleep 30'
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-warn-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
@@ -211,10 +220,17 @@ test('serve: does not warn when the worktree is given explicitly, even if it dif
   const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-nowarn-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [41800, 41810]', 'serve = "echo {port}; sleep 30"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        b: {
+          path: `${main}`,
+          fixedPort: 3000,
+          portRange: [41800, 41810],
+          serve: 'echo {port}; sleep 30'
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-nowarn-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
@@ -271,7 +287,7 @@ async function waitForFileContent(filePath: string, timeoutMs: number): Promise<
   return '';
 }
 
-test('serve --direct: substitutes fixed_port for {port}, records it on the server entry, and leaves the sticky ports map untouched', async () => {
+test('serve --direct: substitutes fixedPort for {port}, records it on the server entry, and leaves the sticky ports map untouched', async () => {
   const base = await mkdtemp(join(tmpdir(), 'portful-serve-direct-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
@@ -286,15 +302,17 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
   const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    [
-      '[repos.d]',
-      `path = "${main}"`,
-      'fixed_port = 41900',
-      'port_range = [41901, 41910]',
-      `serve = "echo {port} > '${outFile}'; sleep 30"`,
-      '',
-    ].join('\n')
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        d: {
+          path: `${main}`,
+          fixedPort: 41900,
+          portRange: [41901, 41910],
+          serve: `echo {port} > '${outFile}'; sleep 30`
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
@@ -320,7 +338,7 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
     }
     await waitForState(stateDir, (s) => s.repos.d?.servers?.main === undefined, 5000);
 
-    // Now serve --direct: {port} should resolve to fixed_port, not the
+    // Now serve --direct: {port} should resolve to fixedPort, not the
     // sticky port, and the sticky ports map must be left exactly as-is.
     directProc = spawn(process.execPath, [binPath, 'serve', 'd/main', '--direct'], { env, stdio: 'ignore' });
     await waitForState(stateDir, (s) => s.repos.d?.servers?.main !== undefined, 5000);
@@ -331,7 +349,7 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
     assert.equal(state.repos.d.ports.main, stickyPort, 'sticky ports map must be untouched by --direct');
 
     const outContent = await waitForFileContent(outFile, 5000);
-    assert.equal(outContent, '41900', '{port} inside the serve template must resolve to fixed_port');
+    assert.equal(outContent, '41900', '{port} inside the serve template must resolve to fixedPort');
   } finally {
     for (const proc of [stickyProc, directProc]) {
       if (proc?.pid) {
@@ -363,10 +381,17 @@ test('serve --direct: refuses to start while the repo\'s proxy is running', asyn
   const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-proxy-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'portful', 'config.toml'),
-    ['[repos.e]', `path = "${main}"`, 'fixed_port = 41950', 'port_range = [41951, 41960]', 'serve = "echo {port}; sleep 30"', ''].join(
-      '\n'
-    )
+    join(configDir, 'portful', 'config.json'),
+    JSON.stringify({
+      repos: {
+        e: {
+          path: `${main}`,
+          fixedPort: 41950,
+          portRange: [41951, 41960],
+          serve: 'echo {port}; sleep 30'
+        }
+      }
+    })
   );
   const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-proxy-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
