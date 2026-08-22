@@ -80,7 +80,7 @@ portful では `portful use` が worktree 名を受け取り、そのポート�
 
 ## 動作要件
 
-- Node.js 20 以上(開発は Node 25 で実施)
+- Node.js 24 以上(開発は Node 26 で実施)
 - macOS または Linux(POSIX の `sh` とプロセスグループに依存し、ポート競合の診断に `lsof` を使います)
 - `git`(worktree の列挙に `git worktree list` を使用)
 - ピッカー([peco](https://github.com/peco/peco) / [fzf](https://github.com/junegunn/fzf))は任意。
@@ -89,12 +89,22 @@ portful では `portful use` が worktree 名を受け取り、そのポート�
 ## インストール
 
 ```sh
-npm install
-npm link
+npm install -g portful
 ```
 
-`npm link` で `portful` 実行ファイルが `PATH` に入ります([tsx](https://github.com/privatenumber/tsx) 経由で動くためビルドは不要です。`src/` を編集すれば即座に反映されます)。
-リンクせずに試したい場合は、チェックアウトから直接 `./bin/portful.js <command>` を実行できます。
+配布しているのは依存を取り込んだ 1 ファイルなので、install で入るのはこのパッケージだけです。
+
+チェックアウトから開発する場合:
+
+```sh
+git clone https://github.com/meganemura/portful.git
+cd portful
+npm install
+./bin/portful.js <command>
+```
+
+この入口は [tsx](https://github.com/privatenumber/tsx) 経由で `src/` の TypeScript を直接実行するので、編集は次のコマンドから反映されます。ビルドは挟みません。
+`npm link` すると `portful` という名前で `PATH` に入ります。
 
 ## クイックスタート
 
@@ -621,8 +631,9 @@ npm install
 npm test        # node:test。テストが実際の設定や state に触れることはありません
 ```
 
-ビルドステップはありません。
-CLI は tsx 経由で `src/` の TypeScript を直接実行します。
+チェックアウトから動かす場合、CLI は tsx 経由で `src/` の TypeScript を直接実行するので、編集にビルドは要りません。
+`npm run build` は publish のためだけにあります。tsup が `src/cli.ts` と依存をまとめて 1 つの `dist/cli.js` にし、npm パッケージが配るのはそれだけです。
+`npm run type-check` は `tsc --noEmit`、`prepublishOnly` は type-check・テスト・ビルドをこの順で走らせます。
 `src/commands/*.ts` が各サブコマンドのハンドラで、`src/proxy.ts` がリバースプロキシの実装本体です(`src/commands/proxy.ts` はその薄い CLI ラッパー)。
 `src/portRefs.ts` が `{<repo>.port}` の解決、`src/tasks.ts` が結線ズレ検知とタスクの一致判定ロジック、`src/picker.ts` が `use` と `task add` で共有するピッカー(`picker` の設定、無ければ peco/fzf の自動検出、それも無ければ番号選択)です。
 `src/overview.ts` が `status`/`status --json` 双方の元データを集約します。

@@ -102,7 +102,7 @@ portful, `portful use` accepts the worktree name and resolves its port internall
 
 ## Requirements
 
-- Node.js 20 or newer (developed on Node 25)
+- Node.js 24 or newer (developed on Node 26)
 - macOS or Linux, since portful relies on POSIX `sh` and process groups,
   and uses `lsof` to diagnose port conflicts
 - `git` (worktrees are enumerated with `git worktree list`)
@@ -114,14 +114,25 @@ portful, `portful use` accepts the worktree name and resolves its port internall
 ## Install
 
 ```sh
-npm install
-npm link
+npm install -g portful
 ```
 
-`npm link` puts a `portful` executable on your `PATH` (backed by
-[tsx](https://github.com/privatenumber/tsx), so no build step is needed:
-edits to `src/` take effect immediately). To try it out without linking
-anything, run `./bin/portful.js <command>` directly from the checkout.
+The published package is a single bundled file with no dependencies of
+its own, so the install adds one package and nothing else.
+
+To work on portful from a checkout instead:
+
+```sh
+git clone https://github.com/meganemura/portful.git
+cd portful
+npm install
+./bin/portful.js <command>
+```
+
+That entry point runs the TypeScript in `src/` through
+[tsx](https://github.com/privatenumber/tsx), so an edit takes effect on
+the next command with no build in between. `npm link` puts it on your
+`PATH` under the name `portful`.
 
 ## Quick start
 
@@ -801,8 +812,12 @@ npm install
 npm test        # node:test; the suite never touches your real config or state
 ```
 
-There is no build step: the CLI runs the TypeScript in `src/` directly
-via tsx. `src/commands/*.ts` hold one subcommand handler each;
+From a checkout the CLI runs the TypeScript in `src/` directly via tsx,
+so an edit takes effect without a build. `npm run build` exists for
+publishing alone: tsup bundles `src/cli.ts` and every dependency into a
+single `dist/cli.js`, which is the only thing the npm package ships.
+`npm run type-check` runs `tsc --noEmit`, and `prepublishOnly` runs the
+type check, the tests, and the build in that order. `src/commands/*.ts` hold one subcommand handler each;
 `src/proxy.ts` is the reverse-proxy implementation itself
 (`src/commands/proxy.ts` is its thin CLI wrapper). `src/portRefs.ts`
 resolves `{<repo>.port}` references, `src/tasks.ts` holds the wiring-
