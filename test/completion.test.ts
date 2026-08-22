@@ -95,8 +95,9 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
     assert.deepEqual(await getCompletions(configDir, [], 1), [
       'use',
       'serve',
-      'run',
+      'exec',
       'status',
+      'list',
       'stop',
       'proxy',
       'task',
@@ -133,8 +134,9 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
     assert.deepEqual(topLevel, [
       'use',
       'serve',
-      'run',
+      'exec',
       'status',
+      'list',
       'stop',
       'proxy',
       'task',
@@ -173,8 +175,8 @@ test('completion: falls back to last-word-is-current when COMP_CWORD is absent',
 test('completion: first argument is prefix-filtered across repo and worktree names', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "portful run b/fe<Tab>": only worktrees under "b" starting with "fe".
-    const feMatches = await getCompletions(configDir, ['run', 'b/fe'], 2);
+    // "portful exec b/fe<Tab>": only worktrees under "b" starting with "fe".
+    const feMatches = await getCompletions(configDir, ['exec', 'b/fe'], 2);
     assert.deepEqual(feMatches, ['b/feature-auth']);
 
     // "portful use b<Tab>": everything starts with "b" here, so all of them.
@@ -204,10 +206,10 @@ test('completion: prune\'s first argument suggests bare repo names only, not rep
 test('completion: first argument with no matches returns empty (falls through to shell default)', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "portful run rails<Tab>": no repo/worktree starts with "rails", so this
+    // "portful exec rails<Tab>": no repo/worktree starts with "rails", so this
     // must come back empty rather than some fallback list — that's what lets
     // zsh's `_default` take over and offer ordinary command/file completion.
-    const noMatches = await getCompletions(configDir, ['run', 'rails'], 2);
+    const noMatches = await getCompletions(configDir, ['exec', 'rails'], 2);
     assert.deepEqual(noMatches, []);
   } finally {
     await rm(base, { recursive: true, force: true });
@@ -218,13 +220,13 @@ test('completion: first argument with no matches returns empty (falls through to
 test('completion: second argument onward is always empty, for any command', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "portful run b <Tab>": the repo has already been chosen; from here on
+    // "portful exec b <Tab>": the repo has already been chosen; from here on
     // it's an arbitrary command, so completion must fall through to the
     // shell's normal file/command completion (e.g. `run b bin/<Tab>`).
-    const afterRepo = await getCompletions(configDir, ['run', 'b', ''], 3);
+    const afterRepo = await getCompletions(configDir, ['exec', 'b', ''], 3);
     assert.deepEqual(afterRepo, []);
 
-    const afterRepoPartial = await getCompletions(configDir, ['run', 'b', 'bin/'], 3);
+    const afterRepoPartial = await getCompletions(configDir, ['exec', 'b', 'bin/'], 3);
     assert.deepEqual(afterRepoPartial, []);
   } finally {
     await rm(base, { recursive: true, force: true });
@@ -261,8 +263,9 @@ test('completion: after "help", suggests command names (excluding help itself)',
     assert.deepEqual(afterHelp, [
       'use',
       'serve',
-      'run',
+      'exec',
       'status',
+      'list',
       'stop',
       'proxy',
       'task',
@@ -338,9 +341,9 @@ test('help <command>: shows that command\'s own help', async () => {
   assert.match(stdout, /Select the active worktree for a repo/);
 });
 
-test('help run: shows run\'s own usage synopsis', async () => {
-  const { stdout } = await execFileAsync(process.execPath, [binPath, 'help', 'run']);
-  assert.match(stdout, /Usage: portful run \[repo\[\/worktree\]\] <cmd\.\.\.>/);
+test('help exec: shows exec\'s own usage synopsis', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [binPath, 'help', 'exec']);
+  assert.match(stdout, /Usage: portful exec \[repo\[\/worktree\]\] <cmd\.\.\.>/);
 });
 
 test('help <unknown command>: fails the same way a bare unknown command would', async () => {

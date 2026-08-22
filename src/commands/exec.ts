@@ -10,8 +10,8 @@ import {
 } from '../repo.ts';
 import { readState } from '../state.ts';
 
-const RUN_USAGE =
-  'Usage: portful run [repo[/worktree]] <cmd...>\n' +
+const EXEC_USAGE =
+  'Usage: portful exec [repo[/worktree]] <cmd...>\n' +
   'Run a command inside a worktree without changing directory. Flags on <cmd...> are passed through untouched.';
 
 /**
@@ -20,9 +20,9 @@ const RUN_USAGE =
  * nothing upstream intercepts a flag meant for the wrapped command; this
  * function reads `rawArgs` directly rather than any yargs-parsed argv).
  */
-export async function runCommand(rawArgs: string[]): Promise<void> {
+export async function execCommand(rawArgs: string[]): Promise<void> {
   if (rawArgs[0] === '-h' || rawArgs[0] === '--help') {
-    console.log(RUN_USAGE);
+    console.log(EXEC_USAGE);
     return;
   }
 
@@ -39,7 +39,7 @@ export async function runCommand(rawArgs: string[]): Promise<void> {
   }
 
   if (cmd.length === 0) {
-    throw new Error('No command given. Usage: portful run [repo[/worktree]] <cmd...>');
+    throw new Error('No command given. Usage: portful exec [repo[/worktree]] <cmd...>');
   }
 
   const cwd = process.cwd();

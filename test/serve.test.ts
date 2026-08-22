@@ -373,13 +373,13 @@ test('serve --direct: refuses to start while the repo\'s proxy is running', asyn
 
   let proxyProc: ReturnType<typeof spawn> | undefined;
   try {
-    proxyProc = spawn(process.execPath, [binPath, 'proxy', 'e'], { env, stdio: 'ignore' });
+    proxyProc = spawn(process.execPath, [binPath, 'proxy', 'start', 'e'], { env, stdio: 'ignore' });
     await waitForState(stateDir, (s) => s.repos.e?.proxy !== undefined, 5000);
 
     await assert.rejects(
       () => execFileAsync(process.execPath, [binPath, 'serve', 'e/main', '--direct'], { env }),
       (err: NodeJS.ErrnoException & { stderr?: string; code?: number }) => {
-        assert.match(String(err.stderr), /Stop "portful proxy" first/);
+        assert.match(String(err.stderr), /Run "portful proxy stop e" first/);
         assert.equal(err.code, 1);
         return true;
       }

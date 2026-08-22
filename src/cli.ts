@@ -4,11 +4,12 @@ import { loadConfig } from './config.ts';
 import { listWorktrees } from './repo.ts';
 import { readState } from './state.ts';
 import { serveCommand } from './commands/serve.ts';
-import { runCommand } from './commands/run.ts';
+import { execCommand } from './commands/exec.ts';
 import { useCommand } from './commands/use.ts';
 import { statusCommand } from './commands/status.ts';
+import { listCommand } from './commands/list.ts';
 import { stopCommand } from './commands/stop.ts';
-import { proxyCommand } from './commands/proxy.ts';
+import { proxyStartCommand, proxyStopCommand } from './commands/proxy.ts';
 import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from './commands/task.ts';
 import { uiCommand } from './commands/ui.ts';
 import { whoamiCommand } from './commands/whoami.ts';
@@ -217,8 +218,9 @@ const repoPositional = (y: Argv) =>
 const COMMAND_NAMES = [
   'use',
   'serve',
-  'run',
+  'exec',
   'status',
+  'list',
   'stop',
   'proxy',
   'task',
@@ -231,18 +233,20 @@ const COMMAND_NAMES = [
 ];
 
 /** Commands whose first argument is a `repo` or `repo/worktree` name. */
-const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'proxy', 'run']);
+const REPO_ARG_COMMANDS = new Set(['use', 'serve', 'stop', 'exec']);
 
 const TASK_SUBCOMMANDS = ['add', 'use', 'list', 'rm'];
+
+const PROXY_SUBCOMMANDS = ['start', 'stop'];
 
 // Extracted so `help` can build a second, independent yargs instance and
 // re-parse `[command, '--help']` (or just `['--help']`) through it (see the
 // `help` command below) without disturbing the instance driving the current
 // invocation. `rawArgs` is threaded through explicitly (rather than each
-// command reading `process.argv` directly) specifically so `run`'s handler
+// command reading `process.argv` directly) specifically so `exec`'s handler
 // — which reads raw argv rather than yargs' parsed result, see below — sees
-// the same args this instance was built with, including when `help run`
-// builds a second instance with a synthesized `['run', '--help']`.
+// the same args this instance was built with, including when `help exec`
+// builds a second instance with a synthesized `['exec', '--help']`.
 function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
   // Overrides yargs' own package.json auto-detection so `--version`
   // includes portful's own commit hash, e.g. "0.1.0 (abc1234)". The commit
@@ -286,21 +290,21 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       })
     )
     .command(
-      'run [target] [cmd..]',
+      'exec [target] [cmd..]',
       'Run a command inside a worktree (flags are passed through untouched)',
       // Disables this command's own --help/--version so a flag meant for the
-      // wrapped command (e.g. `portful run b rails s -h`) reaches it instead
+      // wrapped command (e.g. `portful exec b rails s -h`) reaches it instead
       // of being swallowed by yargs. Other commands are unaffected.
       (y) => y.help(false).version(false),
       handle(async () => {
         // Read raw argv rather than yargs' parsed result: yargs-parser still
         // splits flags like `-p 3105` out of the positional array internally,
-        // but since runCommand ignores that parse entirely, it doesn't matter.
+        // but since execCommand ignores that parse entirely, it doesn't matter.
         // Uses `rawArgs` (this instance's own args), not `process.argv`
-        // directly, so `portful help run` — which builds a second instance
-        // with `rawArgs = ['run', '--help']` — reaches the same '--help'
-        // short-circuit a direct `portful run --help` would.
-        await runCommand(rawArgs.slice(1));
+        // directly, so `portful help exec` — which builds a second instance
+        // with `rawArgs = ['exec', '--help']` — reaches the same '--help'
+        // short-circuit a direct `portful exec --help` would.
+        await execCommand(rawArgs.slice(1));
       })
     )
     .command(
@@ -317,6 +321,19 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       })
     )
     .command(
+      'list',
+      'Show one route per repo: the address clients use and where it goes now',
+      (y) =>
+        y.option('json', {
+          type: 'boolean',
+          default: false,
+          describe: 'Print machine-readable JSON instead of the table',
+        }),
+      handle(async (argv) => {
+        await listCommand({ json: argv.json as boolean });
+      })
+    )
+    .command(
       'stop [repo]',
       'Stop the server for the active (or given) worktree',
       repoPositional,
@@ -325,12 +342,28 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       })
     )
     .command(
-      'proxy [repo]',
-      'Start the reverse proxy for a repo in the foreground',
-      repoPositional,
-      handle(async (argv) => {
-        await proxyCommand({ repo: argv.repo as string | undefined });
-      })
+      'proxy',
+      'Start or stop the reverse proxy for a repo (proxy start/stop)',
+      (y) =>
+        y
+          .command(
+            'start [repo]',
+            'Start the reverse proxy for a repo in the foreground',
+            repoPositional,
+            handle(async (argv) => {
+              await proxyStartCommand({ repo: argv.repo as string | undefined });
+            })
+          )
+          .command(
+            'stop [repo]',
+            'Stop a reverse proxy started in another terminal',
+            repoPositional,
+            handle(async (argv) => {
+              await proxyStopCommand({ repo: argv.repo as string | undefined });
+            })
+          )
+          .demandCommand(1, 'Specify a proxy subcommand: start or stop.'),
+      () => {}
     )
     .command(
       'task',
@@ -436,7 +469,7 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
         // A fresh instance rather than reusing the current one: yargs
         // instances carry parse state, and `--help` here should exit through
         // the exact same help/exit path a real `<command> --help` would.
-        // Passed to buildCli() itself (not `.parse()`) so `run`'s handler,
+        // Passed to buildCli() itself (not `.parse()`) so `exec`'s handler,
         // which reads this instance's own `rawArgs`, sees it too.
         //
         // An unknown target is deliberately NOT given `--help`: yargs' own
@@ -475,7 +508,7 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
     // returns an empty array on zero matches rather than falling back to a
     // broader list: our zsh script treats an empty reply as "fall through to
     // _default" (normal file/command completion), so an unmatched prefix
-    // like `run rails<Tab>` or a second argument like `run b bin/<Tab>`
+    // like `exec rails<Tab>` or a second argument like `exec b bin/<Tab>`
     // correctly gets ordinary shell completion instead of being stuck
     // offering worktree names that can never match.
     .completion('completion-script', false, async () => {
@@ -503,6 +536,17 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
         return names.filter(startsWithCurrent);
       }
 
+      if (command === 'proxy') {
+        if (positionals.length === 1) {
+          return PROXY_SUBCOMMANDS.filter(startsWithCurrent);
+        }
+        if (positionals.length === 2) {
+          const names = await repoAndWorktreeNames();
+          return names.filter(startsWithCurrent);
+        }
+        return [];
+      }
+
       if (command === 'task') {
         if (positionals.length === 1) {
           return TASK_SUBCOMMANDS.filter(startsWithCurrent);
@@ -525,7 +569,7 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
         return [];
       }
 
-      // Second argument onward, for every command (e.g. `run b bin/<Tab>`).
+      // Second argument onward, for every command (e.g. `exec b bin/<Tab>`).
       return [];
     })
     .demandCommand(1, 'Please specify a command.')

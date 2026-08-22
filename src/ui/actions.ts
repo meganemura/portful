@@ -291,7 +291,7 @@ export function pendingMessage(action: Action): string {
  * `use`/`stop`/`task use` in-process via the injected functions, but always
  * opens `serve`/`proxy` externally through `deps.mux` — `portful ui` never
  * runs them itself, keeping them the same kind of foreground process a
- * plain `portful serve`/`portful proxy` invocation would be.
+ * plain `portful serve`/`portful proxy start` invocation would be.
  */
 export async function executeAction(action: Action, overview: Overview, deps: ActionDeps): Promise<string> {
   switch (action.type) {
@@ -361,7 +361,7 @@ export async function executeAction(action: Action, overview: Overview, deps: Ac
         return `Sent SIGTERM to proxy for "${action.repo}" (pid ${pid}).`;
       }
       const cwd = repoPath(overview, action.repo);
-      const command = portfulCommand('proxy', action.repo);
+      const command = portfulCommand('proxy', 'start', action.repo);
       const order = rowOrder(overview, (row) => row.kind === 'repo' && row.repo === action.repo);
       const options = {
         title: `${action.repo}/proxy`,

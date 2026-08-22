@@ -1,14 +1,21 @@
 import { loadConfig } from '../config.ts';
 import { findPortOccupant } from '../ports.ts';
 import { resolveRepo } from '../repo.ts';
-import { ensureRepoState, removeProxyEntrySync, withState } from '../state.ts';
+import { ensureRepoState, readState, removeProxyEntrySync, withState } from '../state.ts';
 import { startProxy } from '../proxy.ts';
+import { waitForExit } from './stop.ts';
 
-export interface ProxyArgs {
+export interface ProxyStartArgs {
   repo?: string;
 }
 
-export async function proxyCommand(args: ProxyArgs): Promise<void> {
+/**
+ * Runs the proxy in the foreground, where portless's `proxy start` runs a
+ * daemon. One terminal tab per proxy keeps the request log visible and makes
+ * Ctrl-C the stop button, so `proxy stop` exists for the other tab rather
+ * than for a background process this command left behind.
+ */
+export async function proxyStartCommand(args: ProxyStartArgs): Promise<void> {
   const config = await loadConfig();
   const { repoName } = await resolveRepo(config, args.repo, process.cwd());
   const repoConfig = config.repos[repoName];
@@ -65,4 +72,55 @@ export async function proxyCommand(args: ProxyArgs): Promise<void> {
       removeProxyEntrySync(repoName, process.pid);
     }
   });
+}
+
+export interface ProxyStopArgs {
+  repo?: string;
+}
+
+/**
+ * Stops a proxy started in another terminal. The proxy removes its own state
+ * entry when it exits, so this command only sends the signal and confirms the
+ * process is gone, the same way `stop` does for a worktree server.
+ */
+export async function proxyStopCommand(args: ProxyStopArgs): Promise<void> {
+  const config = await loadConfig();
+  const { repoName } = await resolveRepo(config, args.repo, process.cwd());
+
+  const state = await readState();
+  const entry = state.repos[repoName]?.proxy;
+  if (!entry) {
+    console.log(`No proxy running for "${repoName}".`);
+    return;
+  }
+
+  try {
+    process.kill(entry.pid, 'SIGTERM');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ESRCH') {
+      throw err;
+    }
+  }
+
+  const exited = await waitForExit(entry.pid);
+
+  if (!exited) {
+    console.error(
+      `Sent SIGTERM but pid ${entry.pid} is still running. It remains visible in "portful status"; ` +
+        `check again shortly or kill it manually.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  // Idempotent: the proxy's own shutdown handler normally removes this entry
+  // first, so only clear it when the dead pid is still the recorded one.
+  await withState((st) => {
+    const rs = ensureRepoState(st, repoName);
+    if (rs.proxy?.pid === entry.pid) {
+      delete rs.proxy;
+    }
+  });
+
+  console.log(`Stopped proxy for "${repoName}" (pid ${entry.pid}).`);
 }

@@ -65,11 +65,11 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     if (proxy) {
       throw new Error(
         `Proxy for "${repoName}" is running on port ${repoConfig.fixedPort} (pid ${proxy.pid}). ` +
-          `Stop "portful proxy" first, then retry "portful serve ${repoName}/${targetName} --direct".`
+          `Run "portful proxy stop ${repoName}" first, then retry "portful serve ${repoName}/${targetName} --direct".`
       );
     }
 
-    // Guard (b): same lsof-based occupant check "portful proxy" itself runs
+    // Guard (b): same lsof-based occupant check "portful proxy start" itself runs
     // before binding fixed_port.
     const occupant = await findPortOccupant(repoConfig.fixedPort);
     if (occupant) {

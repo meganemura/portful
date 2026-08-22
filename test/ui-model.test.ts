@@ -21,6 +21,7 @@ const OVERVIEW: Overview = {
       name: 'api',
       path: '/repos/api',
       fixedPort: 3000,
+      tls: false,
       worktrees: [
         { name: 'api-main', branch: 'main', path: '/repos/api-main' },
         { name: 'api-feature-x', branch: 'feature/x', path: '/repos/api-feature-x' },
@@ -34,6 +35,7 @@ const OVERVIEW: Overview = {
       name: 'front',
       path: '/repos/front',
       fixedPort: 8080,
+      tls: false,
       worktrees: [{ name: 'front-main', branch: 'main', path: '/repos/front-main' }],
       ports: {},
       servers: {},
@@ -103,6 +105,7 @@ test('buildRows: synthesizes an extra worktree row for a server whose worktree n
         name: 'api',
         path: '/repos/api',
         fixedPort: 3000,
+        tls: false,
         worktrees: [{ name: 'api-main', branch: 'main', path: '/repos/api-main' }],
         active: 'api-gone',
         ports: { 'api-main': 3101, 'api-gone': 3105 },

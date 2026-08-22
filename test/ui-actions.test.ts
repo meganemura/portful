@@ -110,6 +110,7 @@ function makeOverview(): Overview {
         name: 'api',
         path: '/repos/api',
         fixedPort: 3000,
+        tls: false,
         worktrees: [{ name: 'api-main', branch: 'main', path: '/repos/api-main' }],
         active: 'api-main',
         ports: { 'api-main': 3101 },

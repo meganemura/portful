@@ -30,6 +30,8 @@ export interface OverviewRepo {
   name: string;
   path: string;
   fixedPort: number;
+  /** True when the repo configures a cert/key pair, so the fixed-port listener terminates TLS and clients must use https. */
+  tls: boolean;
   worktrees: OverviewWorktree[];
   active?: string;
   ports: Record<string, number>;
@@ -92,6 +94,7 @@ export async function buildOverview(config?: Config, state?: State): Promise<Ove
         name,
         path: repoConfig.path,
         fixedPort: repoConfig.fixedPort,
+        tls: repoConfig.https?.cert !== undefined,
         worktrees,
         ports: rs?.ports ?? {},
         servers,

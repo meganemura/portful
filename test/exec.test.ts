@@ -18,7 +18,7 @@ async function git(cwd: string, args: string[]): Promise<void> {
 }
 
 async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
-  const base = await mkdtemp(join(tmpdir(), 'portful-run-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-exec-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -28,7 +28,7 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
   await git(main, ['add', '.']);
   await git(main, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'portful-run-config-'));
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-exec-config-'));
   await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
     join(configDir, 'portful', 'config.toml'),
@@ -40,14 +40,14 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
   return { base, configDir };
 }
 
-test('run: flags on the wrapped command pass through untouched', async () => {
+test('exec: flags on the wrapped command pass through untouched', async () => {
   const { base, configDir } = await makeRepoFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-exec-state-'));
   try {
     const { stdout } = await execFileAsync(
       process.execPath,
       // "b/main" targets the worktree directly, so no `portful use` is needed first.
-      [binPath, 'run', 'b/main', 'echo', '-n', '-h'],
+      [binPath, 'exec', 'b/main', 'echo', '-n', '-h'],
       { env: { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir } }
     );
     assert.equal(stdout, '-h');
@@ -58,13 +58,13 @@ test('run: flags on the wrapped command pass through untouched', async () => {
   }
 });
 
-test('run: --help on the wrapped command passes through when a repo is given', async () => {
+test('exec: --help on the wrapped command passes through when a repo is given', async () => {
   const { base, configDir } = await makeRepoFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-exec-state-'));
   try {
     const { stdout } = await execFileAsync(
       process.execPath,
-      [binPath, 'run', 'b/main', 'echo', '--help', 'world'],
+      [binPath, 'exec', 'b/main', 'echo', '--help', 'world'],
       { env: { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir } }
     );
     assert.equal(stdout.trim(), '--help world');
@@ -83,9 +83,9 @@ async function makeTwoWorktreeFixture(): Promise<{ base: string; main: string; t
   return { base, main, taskB, configDir };
 }
 
-test('run: warns on stderr when cwd is in a different worktree than active, given just the repo name', async () => {
+test('exec: warns on stderr when cwd is in a different worktree than active, given just the repo name', async () => {
   const { base, taskB, configDir } = await makeTwoWorktreeFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-exec-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
   const original = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
   process.env.XDG_CONFIG_HOME = configDir;
@@ -105,7 +105,7 @@ test('run: warns on stderr when cwd is in a different worktree than active, give
     // cwd is task-b, but active is main, and only the bare repo name "b" is
     // given (no explicit /worktree) — this is exactly the trap the warning
     // targets.
-    const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, 'run', 'b', 'echo', 'hi'], {
+    const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, 'exec', 'b', 'echo', 'hi'], {
       cwd: taskB,
       env,
     });
@@ -119,15 +119,15 @@ test('run: warns on stderr when cwd is in a different worktree than active, give
   }
 });
 
-test('run: does not warn when the worktree is given explicitly, even if it differs from cwd', async () => {
+test('exec: does not warn when the worktree is given explicitly, even if it differs from cwd', async () => {
   const { base, taskB, configDir } = await makeTwoWorktreeFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-exec-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   try {
     // cwd is task-b, but "b/main" is given explicitly — the user picked
     // this on purpose, so no warning.
-    const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, 'run', 'b/main', 'echo', 'hi'], {
+    const { stdout, stderr } = await execFileAsync(process.execPath, [binPath, 'exec', 'b/main', 'echo', 'hi'], {
       cwd: taskB,
       env,
     });
@@ -140,13 +140,13 @@ test('run: does not warn when the worktree is given explicitly, even if it diffe
   }
 });
 
-test('run: bare -h/--help shows run usage instead of executing anything', async () => {
+test('exec: bare -h/--help shows exec usage instead of executing anything', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    const { stdout } = await execFileAsync(process.execPath, [binPath, 'run', '-h'], {
+    const { stdout } = await execFileAsync(process.execPath, [binPath, 'exec', '-h'], {
       env: { ...process.env, XDG_CONFIG_HOME: configDir },
     });
-    assert.match(stdout, /Usage: portful run/);
+    assert.match(stdout, /Usage: portful exec/);
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });
