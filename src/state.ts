@@ -40,7 +40,7 @@ export interface State {
 
 export function getStatePath(): string {
   const base = process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state');
-  return join(base, 'wtshunt', 'state.json');
+  return join(base, 'portful', 'state.json');
 }
 
 function emptyState(): State {
@@ -158,7 +158,7 @@ async function releaseLock(lockPath: string): Promise<void> {
 
 /**
  * Serializes read-modify-write access to the state file across concurrent
- * wtshunt invocations using a lockfile (created with the `wx` flag).
+ * portful invocations using a lockfile (created with the `wx` flag).
  */
 export async function withState<T>(mutator: (state: State) => T | Promise<T>): Promise<T> {
   const statePath = getStatePath();

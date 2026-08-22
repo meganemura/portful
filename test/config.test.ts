@@ -29,12 +29,12 @@ async function withEnv<T>(env: Record<string, string | undefined>, fn: () => Pro
 }
 
 test('config: expands tilde in path and parses a valid config', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-'));
-  const home = await mkdtemp(join(tmpdir(), 'wtshunt-home-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-'));
+  const home = await mkdtemp(join(tmpdir(), 'portful-home-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.b]',
         'path = "~/work/b"',
@@ -59,7 +59,7 @@ test('config: expands tilde in path and parses a valid config', async () => {
 });
 
 test('config: missing file throws a helpful error with sample TOML', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-missing-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-missing-'));
   try {
     await withEnv({ XDG_CONFIG_HOME: configDirRoot }, async () => {
       await assert.rejects(
@@ -77,11 +77,11 @@ test('config: missing file throws a helpful error with sample TOML', async () =>
 });
 
 test('config: missing required key throws a validation error', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-invalid-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-invalid-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       ['[repos.b]', 'path = "/tmp/b"', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join('\n')
     );
 
@@ -100,11 +100,11 @@ test('config: missing required key throws a validation error', async () => {
 });
 
 test('config: serve template missing {port} throws a validation error', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-no-port-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-no-port-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.b]',
         'path = "/tmp/b"',
@@ -130,11 +130,11 @@ test('config: serve template missing {port} throws a validation error', async ()
 });
 
 test('config: a template with both {<repo>.port} and {port} passes validation', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-port-ref-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-port-ref-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.api]',
         'path = "/tmp/api"',
@@ -161,11 +161,11 @@ test('config: a template with both {<repo>.port} and {port} passes validation', 
 });
 
 test('config: a template with only {<repo>.port} and no bare {port} still fails validation', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-port-ref-only-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-port-ref-only-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.front]',
         'path = "/tmp/front"',
@@ -191,11 +191,11 @@ test('config: a template with only {<repo>.port} and no bare {port} still fails 
 });
 
 test('config: [picker].command parses when present, and is absent when the section is omitted', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-picker-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-picker-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.b]',
         'path = "/tmp/b"',
@@ -219,11 +219,11 @@ test('config: [picker].command parses when present, and is absent when the secti
 });
 
 test('config: no [picker] section leaves picker undefined', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-no-picker-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-no-picker-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       ['[repos.b]', 'path = "/tmp/b"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
         '\n'
       )
@@ -239,11 +239,11 @@ test('config: no [picker] section leaves picker undefined', async () => {
 });
 
 test('config: an empty [picker].command fails validation', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-picker-empty-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-picker-empty-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.b]',
         'path = "/tmp/b"',
@@ -272,11 +272,11 @@ test('config: an empty [picker].command fails validation', async () => {
 });
 
 test('config: malformed port_range throws a validation error', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-invalid-range-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-invalid-range-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.b]',
         'path = "/tmp/b"',
@@ -305,11 +305,11 @@ async function withTwoRepoConfig<T>(
   repoLines: { api: string[]; front: string[] },
   fn: () => Promise<T>
 ): Promise<T> {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-collision-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-collision-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       ['[repos.api]', ...repoLines.api, '', '[repos.front]', ...repoLines.front, ''].join('\n')
     );
     return await withEnv({ XDG_CONFIG_HOME: configDirRoot }, fn);
@@ -411,17 +411,17 @@ test("config: a repo's fixed_port falling inside its own port_range throws a val
 });
 
 test('config: [repos.<name>.https] parses cert/key/backend and expands tilde in the paths', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-'));
-  const home = await mkdtemp(join(tmpdir(), 'wtshunt-home-https-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-https-'));
+  const home = await mkdtemp(join(tmpdir(), 'portful-home-https-'));
   try {
     const certsDir = join(home, 'certs');
     await mkdir(certsDir, { recursive: true });
     await writeFile(join(certsDir, 'localhost.pem'), 'dummy cert content');
     await writeFile(join(certsDir, 'localhost-key.pem'), 'dummy key content');
 
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.api]',
         'path = "/tmp/api"',
@@ -450,11 +450,11 @@ test('config: [repos.<name>.https] parses cert/key/backend and expands tilde in 
 });
 
 test('config: [repos.<name>.https] with only backend = true (no cert/key) is allowed', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-backend-only-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-https-backend-only-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.api]',
         'path = "/tmp/api"',
@@ -480,11 +480,11 @@ test('config: [repos.<name>.https] with only backend = true (no cert/key) is all
 });
 
 test('config: omitting [repos.<name>.https] leaves https undefined (unchanged http behavior)', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-no-https-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-no-https-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       ['[repos.api]', 'path = "/tmp/api"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
         '\n'
       )
@@ -500,11 +500,11 @@ test('config: omitting [repos.<name>.https] leaves https undefined (unchanged ht
 });
 
 test('config: https.cert without https.key throws a validation error naming the repo', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-cert-only-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-https-cert-only-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.api]',
         'path = "/tmp/api"',
@@ -534,11 +534,11 @@ test('config: https.cert without https.key throws a validation error naming the 
 });
 
 test('config: https.key without https.cert throws a validation error naming the repo', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-key-only-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-https-key-only-'));
   try {
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.api]',
         'path = "/tmp/api"',
@@ -568,17 +568,17 @@ test('config: https.key without https.cert throws a validation error naming the 
 });
 
 test('config: https.cert pointing at a nonexistent file throws a validation error', async () => {
-  const configDirRoot = await mkdtemp(join(tmpdir(), 'wtshunt-config-https-missing-cert-'));
-  const home = await mkdtemp(join(tmpdir(), 'wtshunt-home-https-missing-'));
+  const configDirRoot = await mkdtemp(join(tmpdir(), 'portful-config-https-missing-cert-'));
+  const home = await mkdtemp(join(tmpdir(), 'portful-home-https-missing-'));
   try {
     const certsDir = join(home, 'certs');
     await mkdir(certsDir, { recursive: true });
     await writeFile(join(certsDir, 'localhost-key.pem'), 'dummy key content');
     // Deliberately no localhost.pem written, so the cert path does not exist.
 
-    await mkdir(join(configDirRoot, 'wtshunt'), { recursive: true });
+    await mkdir(join(configDirRoot, 'portful'), { recursive: true });
     await writeFile(
-      join(configDirRoot, 'wtshunt', 'config.toml'),
+      join(configDirRoot, 'portful', 'config.toml'),
       [
         '[repos.api]',
         'path = "/tmp/api"',

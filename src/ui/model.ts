@@ -32,7 +32,7 @@ export interface TaskRow {
 export type UiRow = RepoRow | WorktreeRow | TaskRow;
 
 /**
- * Builds the flat, selectable row list `wtshunt ui` navigates: one header
+ * Builds the flat, selectable row list `portful ui` navigates: one header
  * row per repo followed by its worktree rows, then every task row at the
  * bottom. Pure function of an `Overview` snapshot, so it's independently
  * testable without a terminal.
@@ -66,7 +66,7 @@ export function buildRows(overview: Overview): UiRow[] {
     // A server entry whose worktree no longer exists has no row from the
     // loop above (repo.worktrees only lists what git currently reports) —
     // synthesize one so it's still visible and actionable (e.g. `x` to
-    // stop it), same as `wtshunt prune` would clean up.
+    // stop it), same as `portful prune` would clean up.
     const knownWorktreeNames = new Set(repo.worktrees.map((wt) => wt.name));
     for (const [wtName, server] of Object.entries(repo.servers)) {
       if (knownWorktreeNames.has(wtName)) {
@@ -128,7 +128,7 @@ export function proxyPid(overview: Overview, repo: string): number | undefined {
 }
 
 /**
- * How long `wtshunt ui` waits, after starting a server/proxy, for a later
+ * How long `portful ui` waits, after starting a server/proxy, for a later
  * overview refresh to observe it actually running before giving up on the
  * `◐` "starting up" indicator and falling back to the ordinary `●`/`○` one
  * (see `prunePending`).
@@ -136,7 +136,7 @@ export function proxyPid(overview: Overview, repo: string): number | undefined {
 export const PENDING_TIMEOUT_MS = 15000;
 
 /**
- * How long `wtshunt ui` waits, after *stopping* a server/proxy, for a later
+ * How long `portful ui` waits, after *stopping* a server/proxy, for a later
  * overview refresh to observe it actually gone before giving up on the `◐`
  * "stopping" indicator and falling back to the ordinary `●`/`○` one (see
  * `prunePending`). Much shorter than `PENDING_TIMEOUT_MS`: `stopServer`'s
@@ -151,14 +151,14 @@ export const PENDING_STOP_TIMEOUT_MS = 5000;
 /** Which direction a pending-indicator entry is waiting on: a start (see `PENDING_TIMEOUT_MS`) or a stop (see `PENDING_STOP_TIMEOUT_MS`). */
 export type PendingKind = 'start' | 'stop';
 
-/** One `wtshunt ui` pending-indicator bookkeeping entry: which direction it's waiting on, and when the wait began (`Date.now()`-shaped). */
+/** One `portful ui` pending-indicator bookkeeping entry: which direction it's waiting on, and when the wait began (`Date.now()`-shaped). */
 export interface PendingEntry {
   kind: PendingKind;
   since: number;
 }
 
 /**
- * Canonical key `wtshunt ui`'s in-process pending-indicator bookkeeping
+ * Canonical key `portful ui`'s in-process pending-indicator bookkeeping
  * (and `renderLines`'s `pendingKeys` set) uses to identify a row: the bare
  * repo name for a repo/proxy row, or `repo/worktree` for a worktree/server
  * row. The two never collide -- a worktree name never contains `/` (it's a
@@ -179,13 +179,13 @@ function isObservedRunning(overview: Overview, key: string): boolean {
 }
 
 /**
- * Prunes a "row key -> {kind, since}" pending map -- `wtshunt ui`'s own
+ * Prunes a "row key -> {kind, since}" pending map -- `portful ui`'s own
  * bookkeeping for the `◐` indicator -- against a fresh `overview` snapshot
  * and the current time. A `start` entry drops out once its row is observed
  * running (the ◐ has done its job; the row's real pid/proxy state now
  * renders `●` on its own) or once `PENDING_TIMEOUT_MS` has elapsed with no
  * observed start (falls back to `○` -- a start failure is visible in the
- * pane itself, so `wtshunt ui` just stops waiting rather than guessing
+ * pane itself, so `portful ui` just stops waiting rather than guessing
  * why). A `stop` entry drops out the moment its row is observed *not*
  * running anymore (falls back to `○`) or once `PENDING_STOP_TIMEOUT_MS` has
  * elapsed with the row still observed running (falls back to `●` -- same

@@ -11,14 +11,14 @@ import { ensureRepoState, withState } from '../src/state.ts';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd });
 }
 
 async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-run-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-run-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -28,10 +28,10 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
   await git(main, ['add', '.']);
   await git(main, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-run-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-run-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
       '\n'
     )
@@ -42,11 +42,11 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
 
 test('run: flags on the wrapped command pass through untouched', async () => {
   const { base, configDir } = await makeRepoFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
   try {
     const { stdout } = await execFileAsync(
       process.execPath,
-      // "b/main" targets the worktree directly, so no `wtshunt use` is needed first.
+      // "b/main" targets the worktree directly, so no `portful use` is needed first.
       [binPath, 'run', 'b/main', 'echo', '-n', '-h'],
       { env: { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir } }
     );
@@ -60,7 +60,7 @@ test('run: flags on the wrapped command pass through untouched', async () => {
 
 test('run: --help on the wrapped command passes through when a repo is given', async () => {
   const { base, configDir } = await makeRepoFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
   try {
     const { stdout } = await execFileAsync(
       process.execPath,
@@ -85,7 +85,7 @@ async function makeTwoWorktreeFixture(): Promise<{ base: string; main: string; t
 
 test('run: warns on stderr when cwd is in a different worktree than active, given just the repo name', async () => {
   const { base, taskB, configDir } = await makeTwoWorktreeFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
   const original = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
   process.env.XDG_CONFIG_HOME = configDir;
@@ -121,7 +121,7 @@ test('run: warns on stderr when cwd is in a different worktree than active, give
 
 test('run: does not warn when the worktree is given explicitly, even if it differs from cwd', async () => {
   const { base, taskB, configDir } = await makeTwoWorktreeFixture();
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-run-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-run-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   try {
@@ -146,7 +146,7 @@ test('run: bare -h/--help shows run usage instead of executing anything', async 
     const { stdout } = await execFileAsync(process.execPath, [binPath, 'run', '-h'], {
       env: { ...process.env, XDG_CONFIG_HOME: configDir },
     });
-    assert.match(stdout, /Usage: wtshunt run/);
+    assert.match(stdout, /Usage: portful run/);
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });

@@ -16,8 +16,8 @@ export interface ServeArgs {
    * on the fixed port in production. The sticky ports map (`state`'s
    * per-worktree assignments) is left completely untouched -- this never
    * allocates, records, or overwrites a sticky port. The server entry this
-   * records still carries `fixed_port` as its `port`, so `wtshunt
-   * status`/`wtshunt ui` show it exactly like any other running server.
+   * records still carries `fixed_port` as its `port`, so `portful
+   * status`/`portful ui` show it exactly like any other running server.
    */
   direct?: boolean;
 }
@@ -37,7 +37,7 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   const state = await readState();
   const targetName = worktreeName ?? state.repos[repoName]?.active;
   if (!targetName) {
-    throw new Error(`No active worktree for repo "${repoName}". Run "wtshunt use ${repoName}/<worktree>" first.`);
+    throw new Error(`No active worktree for repo "${repoName}". Run "portful use ${repoName}/<worktree>" first.`);
   }
 
   // Only when the target came from the active pointer (repo omitted, or
@@ -65,17 +65,17 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     if (proxy) {
       throw new Error(
         `Proxy for "${repoName}" is running on port ${repoConfig.fixedPort} (pid ${proxy.pid}). ` +
-          `Stop "wtshunt proxy" first, then retry "wtshunt serve ${repoName}/${targetName} --direct".`
+          `Stop "portful proxy" first, then retry "portful serve ${repoName}/${targetName} --direct".`
       );
     }
 
-    // Guard (b): same lsof-based occupant check "wtshunt proxy" itself runs
+    // Guard (b): same lsof-based occupant check "portful proxy" itself runs
     // before binding fixed_port.
     const occupant = await findPortOccupant(repoConfig.fixedPort);
     if (occupant) {
       console.error(
         `Port ${repoConfig.fixedPort} is already in use:\n${occupant}\n\n` +
-          `Stop that process first, or check "wtshunt status" to see what's using it.`
+          `Stop that process first, or check "portful status" to see what's using it.`
       );
       process.exitCode = 1;
       return;

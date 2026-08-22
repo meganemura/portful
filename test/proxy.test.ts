@@ -29,7 +29,7 @@ const hasOpenssl = await opensslAvailable();
 
 /** Generates a throwaway self-signed cert/key pair in a temp dir for the TLS tests below. Never committed to the repo. */
 async function makeSelfSignedCert(): Promise<{ dir: string; certPath: string; keyPath: string; cert: Buffer; key: Buffer }> {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-proxy-cert-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-proxy-cert-'));
   const certPath = join(dir, 'cert.pem');
   const keyPath = join(dir, 'key.pem');
   await execFileAsync('openssl', [
@@ -54,7 +54,7 @@ async function makeSelfSignedCert(): Promise<{ dir: string; certPath: string; ke
 }
 
 async function withTempState<T>(fn: () => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-proxy-state-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-proxy-state-'));
   const original = process.env.XDG_STATE_HOME;
   process.env.XDG_STATE_HOME = dir;
   try {
@@ -158,7 +158,7 @@ test('proxy: forwards to the active worktree, switches on state change, and 502s
     try {
       const res1 = await fetch(`http://127.0.0.1:${handle.port}/`);
       assert.equal(await res1.text(), 'hello from a');
-      assert.equal(res1.headers.get('x-wtshunt-worktree'), 'wt-a');
+      assert.equal(res1.headers.get('x-portful-worktree'), 'wt-a');
 
       await withState((state) => {
         ensureRepoState(state, 'b').active = 'wt-b';
@@ -166,7 +166,7 @@ test('proxy: forwards to the active worktree, switches on state change, and 502s
 
       const res2 = await fetch(`http://127.0.0.1:${handle.port}/`);
       assert.equal(await res2.text(), 'hello from b');
-      assert.equal(res2.headers.get('x-wtshunt-worktree'), 'wt-b');
+      assert.equal(res2.headers.get('x-portful-worktree'), 'wt-b');
 
       await withState((state) => {
         delete ensureRepoState(state, 'b').servers['wt-b'];
@@ -174,7 +174,7 @@ test('proxy: forwards to the active worktree, switches on state change, and 502s
 
       const res3 = await fetch(`http://127.0.0.1:${handle.port}/`);
       assert.equal(res3.status, 502);
-      assert.equal(res3.headers.get('x-wtshunt-worktree'), 'wt-b');
+      assert.equal(res3.headers.get('x-portful-worktree'), 'wt-b');
       assert.match(await res3.text(), /wt-b/);
     } finally {
       await handle.close();
@@ -191,7 +191,7 @@ test('proxy: 502s with a hint when no worktree is active', async () => {
     try {
       const res = await fetch(`http://127.0.0.1:${handle.port}/`);
       assert.equal(res.status, 502);
-      assert.match(await res.text(), /wtshunt use/);
+      assert.match(await res.text(), /portful use/);
     } finally {
       await handle.close();
     }
@@ -321,8 +321,8 @@ test('proxy: forwards WebSocket upgrades to the active worktree and switches for
       sendHandshake(clientA);
       const handshakeResponse = await readUntil(clientA, (buf) => buf.includes('\r\n\r\n'));
       assert.match(handshakeResponse.toString('latin1'), /^HTTP\/1\.1 101 Switching Protocols/);
-      // No X-Wtshunt-Worktree injection on the upgrade path (see proxy.ts).
-      assert.doesNotMatch(handshakeResponse.toString('latin1'), /X-Wtshunt-Worktree/i);
+      // No X-Portful-Worktree injection on the upgrade path (see proxy.ts).
+      assert.doesNotMatch(handshakeResponse.toString('latin1'), /X-Portful-Worktree/i);
 
       clientA.write('ping-payload');
       const echoed = await readUntil(clientA, (buf) => buf.length > 0);
@@ -359,7 +359,7 @@ test('proxy: WebSocket upgrade 502s when the active worktree has no server', asy
     try {
       client = await connectRaw(handle.port);
       sendHandshake(client);
-      const response = await readUntil(client, (buf) => buf.includes('wtshunt use'));
+      const response = await readUntil(client, (buf) => buf.includes('portful use'));
       assert.match(response.toString('latin1'), /^HTTP\/1\.1 502 Bad Gateway/);
     } finally {
       client?.destroy();
@@ -434,7 +434,7 @@ test(
         try {
           const res = await httpsGet(handle.port, '/');
           assert.equal(res.status, 200);
-          assert.equal(res.headers['x-wtshunt-worktree'], 'wt-a');
+          assert.equal(res.headers['x-portful-worktree'], 'wt-a');
           const parsed = JSON.parse(res.body) as { label: string; headers: Record<string, string> };
           assert.equal(parsed.label, 'a');
           // The listener is TLS, so the plain-http backend should see the
@@ -478,7 +478,7 @@ test(
         try {
           const res = await fetch(`http://127.0.0.1:${handle.port}/`);
           assert.equal(res.status, 200);
-          assert.equal(res.headers.get('x-wtshunt-worktree'), 'wt-a');
+          assert.equal(res.headers.get('x-portful-worktree'), 'wt-a');
           const parsed = (await res.json()) as { label: string; headers: Record<string, string> };
           assert.equal(parsed.label, 'a');
           // The listener itself is plain http here, so existing behavior
@@ -548,7 +548,7 @@ test('proxy: startProxy fails clearly when the TLS cert/key cannot be read', asy
       fixedPort: 0,
       portRange: [0, 0],
       serve: '',
-      https: { cert: '/nonexistent/wtshunt-test-cert.pem', key: '/nonexistent/wtshunt-test-key.pem', backend: false },
+      https: { cert: '/nonexistent/portful-test-cert.pem', key: '/nonexistent/portful-test-key.pem', backend: false },
     };
 
     await assert.rejects(

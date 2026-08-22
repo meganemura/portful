@@ -11,7 +11,7 @@ import { ensureRepoState, withState, type State } from '../src/state.ts';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd });
@@ -26,7 +26,7 @@ async function waitForState(stateDir: string, predicate: (state: State) => boole
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+      const raw = await readFile(join(stateDir, 'portful', 'state.json'), 'utf8');
       if (predicate(JSON.parse(raw) as State)) {
         return;
       }
@@ -38,7 +38,7 @@ async function waitForState(stateDir: string, predicate: (state: State) => boole
 }
 
 test('status --json: prints an Overview JSON shape reflecting active worktree and tasks', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-status-json-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-status-json-repo-'));
   const apiMain = join(base, 'api-main');
   await mkdir(apiMain, { recursive: true });
   await git(apiMain, ['init', '-q', '-b', 'main']);
@@ -50,16 +50,16 @@ test('status --json: prints an Overview JSON shape reflecting active worktree an
   const apiFeatureX = join(base, 'api-feature-x');
   await git(apiMain, ['worktree', 'add', '-q', '-b', 'feature/x', apiFeatureX]);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-json-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-status-json-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.api]', `path = "${apiMain}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
       '\n'
     )
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-json-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-json-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   try {
@@ -96,15 +96,15 @@ test('status --json: prints an Overview JSON shape reflecting active worktree an
 });
 
 test('status (human-readable, default) output is unchanged by the --json addition', async () => {
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-text-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-status-text-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.api]', 'path = "/tmp"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
       '\n'
     )
   );
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-text-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-text-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   try {
@@ -121,7 +121,7 @@ test('status (human-readable, default) output is unchanged by the --json additio
 });
 
 test('status --json / status: staleWiring appears once a referenced repo moves its active worktree out from under a running server', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-status-stale-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-status-stale-repo-'));
   const apiMain = join(base, 'api-main');
   const frontMain = join(base, 'front-main');
 
@@ -143,10 +143,10 @@ test('status --json / status: staleWiring appears once a referenced repo moves i
   await git(frontMain, ['add', '.']);
   await git(frontMain, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-stale-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-status-stale-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     [
       '[repos.api]',
       `path = "${apiMain}"`,
@@ -163,7 +163,7 @@ test('status --json / status: staleWiring appears once a referenced repo moves i
     ].join('\n')
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-stale-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-stale-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   let apiServe: ReturnType<typeof spawn> | undefined;
@@ -220,7 +220,7 @@ test('status --json / status: staleWiring appears once a referenced repo moves i
 });
 
 test('status --json / status: marks a server whose worktree no longer exists, and status prints a prune hint', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-status-gone-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-status-gone-repo-'));
   const apiMain = join(base, 'api-main');
   await mkdir(apiMain, { recursive: true });
   await git(apiMain, ['init', '-q', '-b', 'main']);
@@ -232,16 +232,16 @@ test('status --json / status: marks a server whose worktree no longer exists, an
   const apiTaskB = join(base, 'api-task-b');
   await git(apiMain, ['worktree', 'add', '-q', '-b', 'task-b', apiTaskB]);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-gone-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-status-gone-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.api]', `path = "${apiMain}"`, 'fixed_port = 3000', 'port_range = [42100, 42110]', 'serve = "echo {port}"', ''].join(
       '\n'
     )
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-status-gone-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-status-gone-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   try {
@@ -267,7 +267,7 @@ test('status --json / status: marks a server whose worktree no longer exists, an
 
     const { stdout: textOut } = await execFileAsync(process.execPath, [binPath, 'status'], { env });
     assert.match(textOut, /api-task-b\t.*\(worktree gone\)/);
-    assert.match(textOut, /Run "wtshunt prune" to clean up/);
+    assert.match(textOut, /Run "portful prune" to clean up/);
   } finally {
     await rm(base, { recursive: true, force: true });
     await rm(configDir, { recursive: true, force: true });

@@ -15,7 +15,7 @@ export async function taskAddCommand(args: TaskAddArgs): Promise<void> {
   const config = await loadConfig();
   const preState = await readState();
   if (preState.tasks[args.name]) {
-    throw new Error(`Task "${args.name}" already exists. Remove it first with "wtshunt task rm ${args.name}".`);
+    throw new Error(`Task "${args.name}" already exists. Remove it first with "portful task rm ${args.name}".`);
   }
 
   const members: Record<string, string> = {};
@@ -61,7 +61,7 @@ export async function taskAddCommand(args: TaskAddArgs): Promise<void> {
 
   await withState((state) => {
     if (state.tasks[args.name]) {
-      throw new Error(`Task "${args.name}" already exists. Remove it first with "wtshunt task rm ${args.name}".`);
+      throw new Error(`Task "${args.name}" already exists. Remove it first with "portful task rm ${args.name}".`);
     }
     state.tasks[args.name] = { members };
   });
@@ -90,7 +90,7 @@ export interface TaskUseResult {
 
 /**
  * The bare validate-and-switch logic behind `task use`, with no console
- * output — reused as-is by `wtshunt ui`'s "use task" action, which
+ * output — reused as-is by `portful ui`'s "use task" action, which
  * summarizes the result in its own message line instead.
  */
 export async function applyTask(name: string): Promise<TaskUseResult> {
@@ -161,14 +161,14 @@ export async function taskUseCommand(args: TaskUseArgs): Promise<void> {
   if (result.needsServe.length > 0) {
     console.log('Servers not running yet:');
     for (const repoName of result.needsServe) {
-      console.log(`  [ ] wtshunt serve ${repoName}`);
+      console.log(`  [ ] portful serve ${repoName}`);
     }
   }
 
   for (const mismatch of result.mismatches) {
     console.warn(
       `Warning: the server for "${mismatch.repo}" is still wired to "${mismatch.refRepo}"'s old port ` +
-        `${mismatch.recordedPort}. Run "wtshunt stop ${mismatch.repo} && wtshunt serve ${mismatch.repo}" to rewire it.`
+        `${mismatch.recordedPort}. Run "portful stop ${mismatch.repo} && portful serve ${mismatch.repo}" to rewire it.`
     );
   }
 

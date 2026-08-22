@@ -40,7 +40,7 @@ export type StopResult =
 /**
  * The bare stop-and-confirm logic behind `stop`, for a known repo/worktree
  * pair with no console output or repo/cwd resolution — reused as-is by
- * `wtshunt ui`'s "stop" and "restart" actions, which report the result in
+ * `portful ui`'s "stop" and "restart" actions, which report the result in
  * their own message line instead.
  */
 export async function stopServer(repoName: string, worktreeName: string): Promise<StopResult> {
@@ -108,7 +108,7 @@ export async function stopCommand(args: StopArgs): Promise<void> {
   if (result.status === 'timeout') {
     console.error(
       `Sent SIGTERM but pid ${result.pid} is still running (it may be shutting down slowly or trapping ` +
-        `SIGTERM). It remains visible in "wtshunt status"; check again shortly or kill it manually.`
+        `SIGTERM). It remains visible in "portful status"; check again shortly or kill it manually.`
     );
     process.exitCode = 1;
     return;

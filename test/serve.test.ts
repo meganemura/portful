@@ -11,7 +11,7 @@ import type { State } from '../src/state.ts';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd });
@@ -37,7 +37,7 @@ async function waitForState(stateDir: string, predicate: (state: State) => boole
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+      const raw = await readFile(join(stateDir, 'portful', 'state.json'), 'utf8');
       if (predicate(JSON.parse(raw) as State)) {
         return;
       }
@@ -49,7 +49,7 @@ async function waitForState(stateDir: string, predicate: (state: State) => boole
 }
 
 test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs on the server entry', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-refs-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-serve-refs-repo-'));
   const apiMain = join(base, 'api-main');
   const frontMain = join(base, 'front-main');
 
@@ -69,10 +69,10 @@ test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs o
   await git(frontMain, ['add', '.']);
   await git(frontMain, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-refs-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-refs-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     [
       '[repos.api]',
       `path = "${apiMain}"`,
@@ -89,7 +89,7 @@ test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs o
     ].join('\n')
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-refs-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-refs-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   let apiServe: ReturnType<typeof spawn> | undefined;
@@ -104,7 +104,7 @@ test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs o
     frontServe = spawn(process.execPath, [binPath, 'serve', 'front'], { env, stdio: 'ignore' });
     await waitForState(stateDir, (s) => s.repos.front?.servers['front-main'] !== undefined, 5000);
 
-    const raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+    const raw = await readFile(join(stateDir, 'portful', 'state.json'), 'utf8');
     const state = JSON.parse(raw);
 
     const apiPort = state.repos.api.servers['api-main'].port;
@@ -113,7 +113,7 @@ test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs o
     assert.equal(typeof apiPort, 'number');
     assert.deepEqual(frontEntry.resolvedRefs, { api: apiPort });
   } finally {
-    // Plain SIGTERM to each outer `wtshunt serve` process (not a process
+    // Plain SIGTERM to each outer `portful serve` process (not a process
     // group signal): that process isn't itself detached from this test, so
     // it isn't a group leader, but it does have its own SIGTERM handler
     // that forwards to its detached child's group and then exits.
@@ -134,7 +134,7 @@ test('serve: {<repo>.port} references resolve and get recorded as resolvedRefs o
 });
 
 test('serve: warns on stderr when cwd is in a different worktree than active, given just the repo name', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-warn-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-serve-warn-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -146,15 +146,15 @@ test('serve: warns on stderr when cwd is in a different worktree than active, gi
   const taskB = join(base, 'task-b');
   await git(main, ['worktree', 'add', '-q', '-b', 'task-b', taskB]);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-warn-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-warn-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [41700, 41710]', 'serve = "echo {port}; sleep 30"', ''].join(
       '\n'
     )
   );
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-warn-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-warn-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   let proc: ReturnType<typeof spawn> | undefined;
@@ -196,7 +196,7 @@ test('serve: warns on stderr when cwd is in a different worktree than active, gi
 });
 
 test('serve: does not warn when the worktree is given explicitly, even if it differs from cwd', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-nowarn-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-serve-nowarn-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -208,15 +208,15 @@ test('serve: does not warn when the worktree is given explicitly, even if it dif
   const taskB = join(base, 'task-b');
   await git(main, ['worktree', 'add', '-q', '-b', 'task-b', taskB]);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-nowarn-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-nowarn-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [41800, 41810]', 'serve = "echo {port}; sleep 30"', ''].join(
       '\n'
     )
   );
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-nowarn-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-nowarn-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   let proc: ReturnType<typeof spawn> | undefined;
@@ -272,7 +272,7 @@ async function waitForFileContent(filePath: string, timeoutMs: number): Promise<
 }
 
 test('serve --direct: substitutes fixed_port for {port}, records it on the server entry, and leaves the sticky ports map untouched', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-serve-direct-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -283,10 +283,10 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
   await git(main, ['commit', '-q', '-m', 'init']);
 
   const outFile = join(base, 'direct.port');
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     [
       '[repos.d]',
       `path = "${main}"`,
@@ -296,7 +296,7 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
       '',
     ].join('\n')
   );
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   let stickyProc: ReturnType<typeof spawn> | undefined;
@@ -307,7 +307,7 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
     stickyProc = spawn(process.execPath, [binPath, 'serve', 'd/main'], { env, stdio: 'ignore' });
     await waitForState(stateDir, (s) => s.repos.d?.servers?.main !== undefined, 5000);
 
-    let raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+    let raw = await readFile(join(stateDir, 'portful', 'state.json'), 'utf8');
     let state = JSON.parse(raw) as State;
     const stickyPort = state.repos.d.servers.main.port;
     assert.ok(stickyPort >= 41901 && stickyPort <= 41910, `expected a port_range port, got ${stickyPort}`);
@@ -325,7 +325,7 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
     directProc = spawn(process.execPath, [binPath, 'serve', 'd/main', '--direct'], { env, stdio: 'ignore' });
     await waitForState(stateDir, (s) => s.repos.d?.servers?.main !== undefined, 5000);
 
-    raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+    raw = await readFile(join(stateDir, 'portful', 'state.json'), 'utf8');
     state = JSON.parse(raw) as State;
     assert.equal(state.repos.d.servers.main.port, 41900);
     assert.equal(state.repos.d.ports.main, stickyPort, 'sticky ports map must be untouched by --direct');
@@ -350,7 +350,7 @@ test('serve --direct: substitutes fixed_port for {port}, records it on the serve
 });
 
 test('serve --direct: refuses to start while the repo\'s proxy is running', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-proxy-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-serve-direct-proxy-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -360,15 +360,15 @@ test('serve --direct: refuses to start while the repo\'s proxy is running', asyn
   await git(main, ['add', '.']);
   await git(main, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-proxy-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-proxy-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.e]', `path = "${main}"`, 'fixed_port = 41950', 'port_range = [41951, 41960]', 'serve = "echo {port}; sleep 30"', ''].join(
       '\n'
     )
   );
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-serve-direct-proxy-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-serve-direct-proxy-state-'));
   const env = { ...process.env, XDG_CONFIG_HOME: configDir, XDG_STATE_HOME: stateDir };
 
   let proxyProc: ReturnType<typeof spawn> | undefined;
@@ -379,13 +379,13 @@ test('serve --direct: refuses to start while the repo\'s proxy is running', asyn
     await assert.rejects(
       () => execFileAsync(process.execPath, [binPath, 'serve', 'e/main', '--direct'], { env }),
       (err: NodeJS.ErrnoException & { stderr?: string; code?: number }) => {
-        assert.match(String(err.stderr), /Stop "wtshunt proxy" first/);
+        assert.match(String(err.stderr), /Stop "portful proxy" first/);
         assert.equal(err.code, 1);
         return true;
       }
     );
 
-    const raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+    const raw = await readFile(join(stateDir, 'portful', 'state.json'), 'utf8');
     const state = JSON.parse(raw) as State;
     assert.equal(state.repos.e?.servers?.main, undefined, 'no server should have started');
   } finally {

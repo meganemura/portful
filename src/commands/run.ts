@@ -11,7 +11,7 @@ import {
 import { readState } from '../state.ts';
 
 const RUN_USAGE =
-  'Usage: wtshunt run [repo[/worktree]] <cmd...>\n' +
+  'Usage: portful run [repo[/worktree]] <cmd...>\n' +
   'Run a command inside a worktree without changing directory. Flags on <cmd...> are passed through untouched.';
 
 /**
@@ -39,7 +39,7 @@ export async function runCommand(rawArgs: string[]): Promise<void> {
   }
 
   if (cmd.length === 0) {
-    throw new Error('No command given. Usage: wtshunt run [repo[/worktree]] <cmd...>');
+    throw new Error('No command given. Usage: portful run [repo[/worktree]] <cmd...>');
   }
 
   const cwd = process.cwd();
@@ -57,7 +57,7 @@ export async function runCommand(rawArgs: string[]): Promise<void> {
   const state = await readState();
   const targetName = worktreeName ?? state.repos[repoName]?.active;
   if (!targetName) {
-    throw new Error(`No active worktree for repo "${repoName}". Run "wtshunt use ${repoName}/<worktree>" first.`);
+    throw new Error(`No active worktree for repo "${repoName}". Run "portful use ${repoName}/<worktree>" first.`);
   }
 
   // Only when the target came from the active pointer (repo omitted, or

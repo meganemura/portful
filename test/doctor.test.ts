@@ -12,7 +12,7 @@ import { ensureRepoState, withState } from '../src/state.ts';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd });
@@ -26,7 +26,7 @@ interface Fixture {
 }
 
 async function makeFixture(fixedPort = 3000, portRange: [number, number] = [3101, 3199]): Promise<Fixture> {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-doctor-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-doctor-repo-'));
   const apiMain = join(base, 'api-main');
   await mkdir(apiMain, { recursive: true });
   await git(apiMain, ['init', '-q', '-b', 'main']);
@@ -36,10 +36,10 @@ async function makeFixture(fixedPort = 3000, portRange: [number, number] = [3101
   await git(apiMain, ['add', '.']);
   await git(apiMain, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-doctor-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-doctor-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     [
       '[repos.api]',
       `path = "${apiMain}"`,
@@ -50,7 +50,7 @@ async function makeFixture(fixedPort = 3000, portRange: [number, number] = [3101
     ].join('\n')
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-doctor-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-doctor-state-'));
 
   return { base, configDir, stateDir, apiMain };
 }
@@ -84,7 +84,7 @@ test('doctor: a healthy fixture prints every section and exits 0', async () => {
   try {
     const { stdout } = await execFileAsync(process.execPath, [binPath, 'doctor'], { env: envFor(fixture) });
 
-    assert.match(stdout, /^wtshunt \d+\.\d+\.\d+/m);
+    assert.match(stdout, /^portful \d+\.\d+\.\d+/m);
     assert.match(stdout, /^Node v/m);
     assert.match(stdout, /^Platform: /m);
     assert.match(stdout, /^Config: /m);
@@ -103,8 +103,8 @@ test('doctor: a healthy fixture prints every section and exits 0', async () => {
 });
 
 test('doctor: reports a missing config as a finding and exits 1, without crashing', async () => {
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-doctor-noconfig-'));
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-doctor-noconfig-state-'));
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-doctor-noconfig-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-doctor-noconfig-state-'));
   try {
     await assert.rejects(
       () =>
@@ -113,7 +113,7 @@ test('doctor: reports a missing config as a finding and exits 1, without crashin
         }),
       (err: NodeJS.ErrnoException & { code?: number; stdout?: string }) => {
         assert.equal(err.code, 1);
-        assert.match(String(err.stdout), /wtshunt \d+\.\d+\.\d+/); // version/node/platform still printed
+        assert.match(String(err.stdout), /portful \d+\.\d+\.\d+/); // version/node/platform still printed
         assert.match(String(err.stdout), /FAILED to load/);
         assert.match(String(err.stdout), /\(skipped: config failed to load\)/);
         return true;

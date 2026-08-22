@@ -22,7 +22,7 @@ async function git(cwd: string, args: string[]): Promise<void> {
 }
 
 async function makeGitRepoWithWorktree(): Promise<{ base: string; main: string; worktree: string }> {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -108,7 +108,7 @@ test('resolveWorktreeFromCwd: resolves repo and worktree separately for the main
 });
 
 test('resolveWorktreeFromCwd: throws with the list of registered repos when cwd matches nothing', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-unrelated-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-unrelated-'));
   try {
     const config: Config = {
       repos: {
@@ -145,7 +145,7 @@ test('cwdActiveMismatchWarning: warns only when cwd is in a different worktree o
     assert.equal(await cwdActiveMismatchWarning(config, main, 'b', 'main'), undefined);
 
     // cwd isn't in any registered worktree at all: no warning.
-    const outside = await mkdtemp(join(tmpdir(), 'wtshunt-unrelated-'));
+    const outside = await mkdtemp(join(tmpdir(), 'portful-unrelated-'));
     try {
       assert.equal(await cwdActiveMismatchWarning(config, outside, 'b', 'main'), undefined);
     } finally {
@@ -157,7 +157,7 @@ test('cwdActiveMismatchWarning: warns only when cwd is in a different worktree o
 });
 
 test('repo: throws with the list of registered repos when cwd matches nothing', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-unrelated-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-unrelated-'));
   try {
     const config: Config = {
       repos: {

@@ -13,7 +13,7 @@ const EMPTY_CONFIG: Config = { repos: {} };
 // made-up name simulates "not found" — the same injection pattern already
 // used for the mux adapters, so these tests never depend on whether peco or
 // fzf actually happen to be installed on the machine running them.
-const MISSING_BIN = 'wtshunt-definitely-not-a-real-binary-xyz';
+const MISSING_BIN = 'portful-definitely-not-a-real-binary-xyz';
 
 test('resolvePickerKind: an explicit [picker].command always wins', async () => {
   const config: Config = { repos: {}, picker: { command: 'fzf' } };
@@ -42,10 +42,10 @@ test('resolvePickerKind: works with no config at all, not just an empty one', as
 });
 
 async function withConfig<T>(pickerTomlLines: string[], fn: () => Promise<T>): Promise<T> {
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-picker-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-picker-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     [
       '[repos.b]',
       'path = "/tmp/b"',

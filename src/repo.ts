@@ -248,7 +248,7 @@ export async function resolveTargetWorktree(
 
   const targetName = worktreeName ?? activeWorktreeName;
   if (!targetName) {
-    throw new Error(`No active worktree for repo "${repoName}". Run "wtshunt use ${repoName}/<worktree>" first.`);
+    throw new Error(`No active worktree for repo "${repoName}". Run "portful use ${repoName}/<worktree>" first.`);
   }
 
   const worktree = findWorktree(worktrees, targetName);

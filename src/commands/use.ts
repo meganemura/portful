@@ -71,7 +71,7 @@ export interface SetActiveResult {
 
 /**
  * The bare state mutation behind `use`, with no console output — reused
- * as-is by `wtshunt ui`'s "use worktree" action, which reports the result
+ * as-is by `portful ui`'s "use worktree" action, which reports the result
  * in its own message line instead.
  */
 export async function setActiveWorktree(repoName: string, worktreeName: string): Promise<SetActiveResult> {
@@ -89,7 +89,7 @@ async function setActiveAndReport(repoName: string, worktree: WorktreeInfo): Pro
 
   if (!result.hasServer) {
     console.warn(
-      `Warning: no server running for "${worktree.name}". Start one with \`wtshunt serve ${repoName}\`.`
+      `Warning: no server running for "${worktree.name}". Start one with \`portful serve ${repoName}\`.`
     );
   }
   if (result.proxyActive) {

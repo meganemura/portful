@@ -72,7 +72,7 @@ function reportError(err: unknown): void {
   process.exitCode = 1;
 }
 
-const APP_NAME = 'wtshunt';
+const APP_NAME = 'portful';
 
 function isZshShell(): boolean {
   return (process.env.SHELL ?? '').includes('zsh');
@@ -245,7 +245,7 @@ const TASK_SUBCOMMANDS = ['add', 'use', 'list', 'rm'];
 // builds a second instance with a synthesized `['run', '--help']`.
 function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
   // Overrides yargs' own package.json auto-detection so `--version`
-  // includes wtshunt's own commit hash, e.g. "0.1.0 (abc1234)". The commit
+  // includes portful's own commit hash, e.g. "0.1.0 (abc1234)". The commit
   // hash needs a synchronous `git rev-parse` — only actually run when
   // --version/-v is present in rawArgs, so an ordinary `use`/`serve`/etc.
   // invocation (built through this same function) never pays for it.
@@ -259,7 +259,7 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
   );
 
   return yargs(rawArgs)
-    .scriptName('wtshunt')
+    .scriptName('portful')
     .locale('en')
     .version(versionString)
     .command(
@@ -289,7 +289,7 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       'run [target] [cmd..]',
       'Run a command inside a worktree (flags are passed through untouched)',
       // Disables this command's own --help/--version so a flag meant for the
-      // wrapped command (e.g. `wtshunt run b rails s -h`) reaches it instead
+      // wrapped command (e.g. `portful run b rails s -h`) reaches it instead
       // of being swallowed by yargs. Other commands are unaffected.
       (y) => y.help(false).version(false),
       handle(async () => {
@@ -297,9 +297,9 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
         // splits flags like `-p 3105` out of the positional array internally,
         // but since runCommand ignores that parse entirely, it doesn't matter.
         // Uses `rawArgs` (this instance's own args), not `process.argv`
-        // directly, so `wtshunt help run` — which builds a second instance
+        // directly, so `portful help run` — which builds a second instance
         // with `rawArgs = ['run', '--help']` — reaches the same '--help'
-        // short-circuit a direct `wtshunt run --help` would.
+        // short-circuit a direct `portful run --help` would.
         await runCommand(rawArgs.slice(1));
       })
     )
@@ -441,10 +441,10 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
         //
         // An unknown target is deliberately NOT given `--help`: yargs' own
         // --help flag takes priority over its "unknown command" validation
-        // (confirmed: `wtshunt nosuchcmd --help` exits 0 with plain help,
+        // (confirmed: `portful nosuchcmd --help` exits 0 with plain help,
         // same as a bare `--help`), which would silently turn "help
         // <unknown>" into a success instead of the same error a bare
-        // `wtshunt <unknown>` produces.
+        // `portful <unknown>` produces.
         let args: string[];
         if (target === undefined) {
           args = ['--help'];

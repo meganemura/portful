@@ -16,7 +16,7 @@ import {
   shQuote,
   templateMux,
   tmuxMux,
-  wtshuntCommand,
+  portfulCommand,
 } from '../src/mux.ts';
 import type { Config } from '../src/config.ts';
 
@@ -156,7 +156,7 @@ test('renderTemplate: substitutes {title}/{cmd}/{cwd}, each shell-quoted', () =>
 });
 
 test('templateMux: a multi-word, shell-metacharacter-laden {cmd} survives as one token', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-template-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-template-'));
   const outFile = join(dir, 'out.txt');
   try {
     // The template's own tool is stood in for by a plain `sh -c`: it takes
@@ -175,8 +175,8 @@ test('templateMux: a multi-word, shell-metacharacter-laden {cmd} survives as one
   }
 });
 
-test('wtshuntCommand: builds a shell-quoted invocation of node + wtshunt\'s own resolved bin path', () => {
-  const command = wtshuntCommand('serve', 'api/feature x');
+test('portfulCommand: builds a shell-quoted invocation of node + portful\'s own resolved bin path', () => {
+  const command = portfulCommand('serve', 'api/feature x');
   assert.ok(command.startsWith(shQuote(process.execPath) + ' '));
   assert.ok(command.includes("'api/feature x'"));
 });
@@ -223,7 +223,7 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
  * but only ever against this stand-in, never the real `herdr`). Understands
  * just enough of `pane list`/`pane split`/`pane rename`/`pane run`/`pane
  * layout`/`pane get`/`tab list`/`tab create` to drive `herdrMux`'s
- * anchor-selection, pane-creation, and dedicated-"wtshunt"-tab logic. Every
+ * anchor-selection, pane-creation, and dedicated-"portful"-tab logic. Every
  * invocation is logged (via `$STUB_LOG`, one JSON line per call) before
  * dispatching on its subcommand, including one that matches none of the
  * branches below — which falls through to `process.exit(1)`, so `agent
@@ -266,7 +266,7 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
  *   given — when that var is set, so tests that don't care about `tab list`
  *   afterward can skip it).
  * - **New pane ids.** A single `open()` call can create more than one pane
- *   (the dedicated "wtshunt" tab's ui-pane-then-server-pane creation does
+ *   (the dedicated "portful" tab's ui-pane-then-server-pane creation does
  *   exactly that), so a single reusable `$STUB_NEXT_PANE_ID` value isn't
  *   always enough to give each one a distinct id within one test. When
  *   `$STUB_NEXT_PANE_ID_QUEUE` (a file path) is set, each new-pane event
@@ -279,7 +279,7 @@ test('herdrMux: detects via HERDR_ENV or HERDR_SOCKET_PATH without ever invoking
  *
  * Tests drive scenarios by setting these env vars before each `open()` call
  * and by rewriting the state files directly (e.g. to simulate the user
- * closing a pane between two `open()` calls, or to pre-seed a "wtshunt" tab
+ * closing a pane between two `open()` calls, or to pre-seed a "portful" tab
  * that already has a labeled ui pane).
  */
 async function writeHerdrStub(dir: string): Promise<string> {
@@ -539,7 +539,7 @@ async function setUpHerdrOpenTest(dir: string): Promise<{
 /**
  * Queues up distinct pane ids for a single `open()` call that creates more
  * than one pane (see the stub's own doc comment on "new pane ids") —
- * `createWtshuntTab` splitting a fresh ui pane and then a server pane off it
+ * `createPortfulTab` splitting a fresh ui pane and then a server pane off it
  * being the only case in this suite.
  */
 async function setNextPaneIdQueue(dir: string, ids: string[]): Promise<void> {
@@ -549,14 +549,14 @@ async function setNextPaneIdQueue(dir: string, ids: string[]): Promise<void> {
 }
 
 test('herdrMux.open: (a) a first open with order splits off HERDR_PANE_ID, forwarding --cwd and XDG_* via --env, then renames and runs the command verbatim', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PANE_ID = 'w1:p1'; // wtshunt ui's own pane
+    process.env.HERDR_PANE_ID = 'w1:p1'; // portful ui's own pane
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
-    process.env.XDG_CONFIG_HOME = '/tmp/wtshunt-test-config';
-    process.env.XDG_STATE_HOME = '/tmp/wtshunt-test-state';
+    process.env.XDG_CONFIG_HOME = '/tmp/portful-test-config';
+    process.env.XDG_STATE_HOME = '/tmp/portful-test-state';
 
     const mux = herdrMux({ herdrBin });
     await mux.open({ title: 'api/feature-x', command: 'echo hi', cwd: '/tmp', order: 0 });
@@ -574,8 +574,8 @@ test('herdrMux.open: (a) a first open with order splits off HERDR_PANE_ID, forwa
     assert.ok(split.argv.includes('--no-focus'));
     assert.equal(flagValue(split, '--cwd'), '/tmp');
     assert.deepEqual(flagValues(split, '--env'), [
-      'XDG_CONFIG_HOME=/tmp/wtshunt-test-config',
-      'XDG_STATE_HOME=/tmp/wtshunt-test-state',
+      'XDG_CONFIG_HOME=/tmp/portful-test-config',
+      'XDG_STATE_HOME=/tmp/portful-test-state',
     ]);
 
     const rename = calls[2];
@@ -590,7 +590,7 @@ test('herdrMux.open: (a) a first open with order splits off HERDR_PANE_ID, forwa
 });
 
 test("herdrMux.open: (b) a second open with a larger order splits off the first open's pane, not HERDR_PANE_ID", async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -616,7 +616,7 @@ test("herdrMux.open: (b) a second open with a larger order splits off the first 
 });
 
 test('herdrMux.open: (c) an open with a smaller order than any tracked pane splits off HERDR_PANE_ID', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -642,7 +642,7 @@ test('herdrMux.open: (c) an open with a smaller order than any tracked pane spli
 });
 
 test('herdrMux.open: (d) a tracked pane no longer reported by pane list is dropped and never used as an anchor again', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile, stateFile } = await setUpHerdrOpenTest(dir);
@@ -673,11 +673,11 @@ test('herdrMux.open: (d) a tracked pane no longer reported by pane list is dropp
 });
 
 test('herdrMux.open: (e) with no anchor available, open falls back to tab create, forwarding --workspace only when HERDR_WORKSPACE_ID is set', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
-    delete process.env.HERDR_PANE_ID; // wtshunt ui wasn't itself started from a herdr pane
+    delete process.env.HERDR_PANE_ID; // portful ui wasn't itself started from a herdr pane
     delete process.env.HERDR_WORKSPACE_ID;
 
     const mux = herdrMux({ herdrBin });
@@ -704,7 +704,7 @@ test('herdrMux.open: (e) with no anchor available, open falls back to tab create
 });
 
 test('herdrMux.open: (f) a nonzero-exit or pane_id-less pane split response makes open throw, and rename/run never run', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -729,7 +729,7 @@ test('herdrMux.open: (f) a nonzero-exit or pane_id-less pane split response make
 });
 
 test('herdrMux.open: a nonzero-exit or pane_id-less tab create response also makes open throw', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -754,7 +754,7 @@ test('herdrMux.open: a nonzero-exit or pane_id-less tab create response also mak
 });
 
 test('herdrMux.open: (g) a failed pane rename is ignored, and pane run still runs the exec-wrapped command', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -777,7 +777,7 @@ test('herdrMux.open: (g) a failed pane rename is ignored, and pane run still run
 });
 
 test('herdrMux.open: (h) agent start / pane neighbor / pane swap / pane layout / pane focus are never invoked, across split, tab-create, and rename-failure scenarios', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -819,7 +819,7 @@ test('herdrMux.open: (h) agent start / pane neighbor / pane swap / pane layout /
 });
 
 test('herdrMux.open: when pane list fails, only its cleanup is skipped — pane split still proceeds off HERDR_PANE_ID', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -841,28 +841,28 @@ test('herdrMux.open: when pane list fails, only its cleanup is skipped — pane 
   }
 });
 
-// --- Dedicated "wtshunt" tab: plugin mode. ---
+// --- Dedicated "portful" tab: plugin mode. ---
 //
-// wtshunt ships as a herdr plugin whose `ui` pane is an `overlay` — it
+// portful ships as a herdr plugin whose `ui` pane is an `overlay` — it
 // floats over whichever tab the user was actually working in rather than
 // living inside it, so splitting off it (HERDR_PANE_ID, used above) would
 // insert serve/proxy panes into that tab instead. These tests drive
 // `herdrMux.open()` with `HERDR_PLUGIN_ID` set (confirmed by hands-on
 // testing to be how herdr marks a plugin-pane command) to exercise the
-// dedicated-tab flow that avoids that: `wtshunt ui` pinned across the top
+// dedicated-tab flow that avoids that: `portful ui` pinned across the top
 // row, serve/proxy panes lined up side by side in the row below it.
 
-test('herdrMux.open (plugin mode): (a) creates a dedicated "wtshunt" tab when none exists yet — its root pane becomes the labeled ui pane running `wtshunt ui`, and the requested pane splits off it downward at 30%', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+test('herdrMux.open (plugin mode): (a) creates a dedicated "portful" tab when none exists yet — its root pane becomes the labeled ui pane running `portful ui`, and the requested pane splits off it downward at 30%', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
-    process.env.HERDR_PANE_ID = 'overlay-pane'; // wtshunt ui's own overlay pane — must never be split off
+    process.env.HERDR_PANE_ID = 'overlay-pane'; // portful ui's own overlay pane — must never be split off
     process.env.STUB_NEXT_TAB_ID = 'w1:t9';
-    process.env.XDG_CONFIG_HOME = '/tmp/wtshunt-test-config';
-    process.env.XDG_STATE_HOME = '/tmp/wtshunt-test-state';
+    process.env.XDG_CONFIG_HOME = '/tmp/portful-test-config';
+    process.env.XDG_STATE_HOME = '/tmp/portful-test-state';
     await setNextPaneIdQueue(dir, ['w1:p9', 'w1:p10']); // the tab's root (ui) pane, then the row's own pane
 
     const mux = herdrMux({ herdrBin });
@@ -879,19 +879,19 @@ test('herdrMux.open (plugin mode): (a) creates a dedicated "wtshunt" tab when no
 
     const tabCreate = calls[1];
     assert.equal(workspaceOf(tabCreate), 'w1');
-    assert.equal(flagValue(tabCreate, '--label'), 'wtshunt');
+    assert.equal(flagValue(tabCreate, '--label'), 'portful');
     assert.ok(tabCreate.argv.includes('--no-focus'));
     assert.equal(flagValue(tabCreate, '--cwd'), undefined, "the ui pane doesn't depend on the row's own cwd");
     assert.deepEqual(flagValues(tabCreate, '--env'), [
-      'XDG_CONFIG_HOME=/tmp/wtshunt-test-config',
-      'XDG_STATE_HOME=/tmp/wtshunt-test-state',
+      'XDG_CONFIG_HOME=/tmp/portful-test-config',
+      'XDG_STATE_HOME=/tmp/portful-test-state',
     ]);
 
     const uiRename = calls[2];
-    assert.deepEqual(uiRename.argv, ['pane', 'rename', 'w1:p9', 'wtshunt-ui']);
+    assert.deepEqual(uiRename.argv, ['pane', 'rename', 'w1:p9', 'portful-ui']);
 
     const uiRun = calls[3];
-    assert.deepEqual(uiRun.argv, ['pane', 'run', 'w1:p9', `exec ${wtshuntCommand('ui')}`]);
+    assert.deepEqual(uiRun.argv, ['pane', 'run', 'w1:p9', `exec ${portfulCommand('ui')}`]);
 
     const serverSplit = calls[4];
     assert.equal(paneArgOf(serverSplit), 'w1:p9', 'the requested pane splits off the ui pane, not HERDR_PANE_ID');
@@ -911,20 +911,20 @@ test('herdrMux.open (plugin mode): (a) creates a dedicated "wtshunt" tab when no
 });
 
 test('herdrMux.open (plugin mode): (b) tab exists with a labeled ui pane and an empty row below it — splits the ui pane itself downward at 30%', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile, stateFile, tabsStateFile, layoutStateFile, labelsStateFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.HERDR_PANE_ID = 'overlay-pane';
 
-    // A "wtshunt" tab already exists (from an earlier wtshunt ui session)
+    // A "portful" tab already exists (from an earlier portful ui session)
     // with just its labeled ui pane — nothing below it yet.
-    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'portful' }]));
     await writeFile(stateFile, JSON.stringify([{ pane_id: 'w1:p1', tab_id: 'w1:t9' }]));
     await writeFile(layoutStateFile, JSON.stringify([{ pane_id: 'w1:p1', rect: { x: 0, y: 0 } }]));
-    await writeFile(labelsStateFile, JSON.stringify({ 'w1:p1': 'wtshunt-ui' }));
+    await writeFile(labelsStateFile, JSON.stringify({ 'w1:p1': 'portful-ui' }));
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
 
     const mux = herdrMux({ herdrBin });
@@ -951,11 +951,11 @@ test('herdrMux.open (plugin mode): (b) tab exists with a labeled ui pane and an 
 });
 
 test("herdrMux.open (plugin mode): (c) once a pane is tracked in the tab, a later open with a higher order splits off it rightward, without consulting pane layout or pane get", async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.HERDR_PANE_ID = 'overlay-pane';
     // STUB_NEXT_TAB_ID makes the stub record the tab on creation, so the
@@ -989,18 +989,18 @@ test("herdrMux.open (plugin mode): (c) once a pane is tracked in the tab, a late
 });
 
 test("herdrMux.open (plugin mode): (d) with no tracked anchor, a tab with an ui pane and two rows below it splits the leftmost pane in that row rightward — the ui pane is never chosen", async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile, stateFile, tabsStateFile, layoutStateFile, labelsStateFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.HERDR_PANE_ID = 'overlay-pane';
 
-    // A "wtshunt" tab already exists, with its ui pane on top and two
+    // A "portful" tab already exists, with its ui pane on top and two
     // serve/proxy panes side by side below it, but this fresh herdrMux()
     // instance has nothing tracked in memory for it yet.
-    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'portful' }]));
     await writeFile(
       stateFile,
       JSON.stringify([
@@ -1017,7 +1017,7 @@ test("herdrMux.open (plugin mode): (d) with no tracked anchor, a tab with an ui 
         { pane_id: 'w1:p3', rect: { x: 40, y: 20 } }, // bottom row
       ])
     );
-    await writeFile(labelsStateFile, JSON.stringify({ 'w1:p1': 'wtshunt-ui' }));
+    await writeFile(labelsStateFile, JSON.stringify({ 'w1:p1': 'portful-ui' }));
     process.env.STUB_NEXT_PANE_ID = 'w1:p4';
 
     const mux = herdrMux({ herdrBin });
@@ -1039,17 +1039,17 @@ test("herdrMux.open (plugin mode): (d) with no tracked anchor, a tab with an ui 
 });
 
 test("herdrMux.open (plugin mode): (e) a tab with no ui-labeled pane falls back to the legacy leftmost-pane-in-tab behavior, splitting rightward", async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile, stateFile, tabsStateFile, layoutStateFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.HERDR_PANE_ID = 'overlay-pane';
 
     // A tab from before the ui-pane convention (or one whose label lookup
-    // simply never matches): two panes, neither labeled "wtshunt-ui".
-    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    // simply never matches): two panes, neither labeled "portful-ui".
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'portful' }]));
     await writeFile(
       stateFile,
       JSON.stringify([
@@ -1088,19 +1088,19 @@ test("herdrMux.open (plugin mode): (e) a tab with no ui-labeled pane falls back 
   }
 });
 
-test('herdrMux.open (plugin mode): a "wtshunt" tab with zero live panes is treated the same as no tab at all', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+test('herdrMux.open (plugin mode): a "portful" tab with zero live panes is treated the same as no tab at all', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile, tabsStateFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.HERDR_PANE_ID = 'overlay-pane';
 
-    // `tab list` reports a "wtshunt" tab, but `pane list` (left at its
+    // `tab list` reports a "portful" tab, but `pane list` (left at its
     // default empty state) has nothing belonging to it — e.g. it was closed
     // moments after `tab list` ran.
-    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'portful' }]));
     await setNextPaneIdQueue(dir, ['w1:p2', 'w1:p3']);
 
     const mux = herdrMux({ herdrBin });
@@ -1109,7 +1109,7 @@ test('herdrMux.open (plugin mode): a "wtshunt" tab with zero live panes is treat
     const calls = await readStubLog(logFile);
     const tabCreates = callsMatching(calls, 'tab', 'create');
     assert.equal(tabCreates.length, 1, 'no anchor pane existed, so a fresh tab is created instead');
-    assert.equal(flagValue(tabCreates[0], '--label'), 'wtshunt');
+    assert.equal(flagValue(tabCreates[0], '--label'), 'portful');
     const splits = callsMatching(calls, 'pane', 'split');
     assert.equal(splits.length, 1, "the fresh tab still splits off its own new ui pane for the row");
     assert.equal(paneArgOf(splits[0]), 'w1:p2');
@@ -1121,16 +1121,16 @@ test('herdrMux.open (plugin mode): a "wtshunt" tab with zero live panes is treat
 });
 
 test('herdrMux.open (plugin mode): if pane layout fails, falls back to the first pane pane list reported for the tab', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile, stateFile, tabsStateFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.HERDR_PANE_ID = 'overlay-pane';
     process.env.STUB_LAYOUT_FAIL = '1';
 
-    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'wtshunt' }]));
+    await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 'w1:t9', label: 'portful' }]));
     await writeFile(
       stateFile,
       JSON.stringify([
@@ -1161,7 +1161,7 @@ test('herdrMux.open (plugin mode): if pane layout fails, falls back to the first
 });
 
 test('herdrMux.open: without HERDR_PLUGIN_ID or HERDR_TAB_ID, neither dedicated-tab flow runs even if HERDR_WORKSPACE_ID is set', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -1184,11 +1184,11 @@ test('herdrMux.open: without HERDR_PLUGIN_ID or HERDR_TAB_ID, neither dedicated-
 });
 
 test('herdrMux.open (plugin mode): falls back to the ordinary flow when HERDR_WORKSPACE_ID is unset', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     delete process.env.HERDR_WORKSPACE_ID;
     process.env.HERDR_PANE_ID = 'overlay-pane';
     process.env.STUB_NEXT_PANE_ID = 'w1:p2';
@@ -1208,11 +1208,11 @@ test('herdrMux.open (plugin mode): falls back to the ordinary flow when HERDR_WO
 });
 
 test('herdrMux.open (plugin mode): falls back to the ordinary flow when tab list fails', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-plugin-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-plugin-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
-    process.env.HERDR_PLUGIN_ID = 'wtshunt';
+    process.env.HERDR_PLUGIN_ID = 'portful';
     process.env.HERDR_WORKSPACE_ID = 'w1';
     process.env.HERDR_PANE_ID = 'overlay-pane';
     process.env.STUB_TABLIST_FAIL = '1';
@@ -1233,30 +1233,30 @@ test('herdrMux.open (plugin mode): falls back to the ordinary flow when tab list
   }
 });
 
-// --- Dedicated "wtshunt" tab: tab-inner mode. ---
+// --- Dedicated "portful" tab: tab-inner mode. ---
 //
-// A `wtshunt ui` started directly inside a pane (no plugin involved, so
+// A `portful ui` started directly inside a pane (no plugin involved, so
 // `HERDR_PLUGIN_ID` is unset) still routes into the same dedicated layout if
-// the pane it's running in is itself already inside the "wtshunt" tab — e.g.
-// a user who pressed `s`/`p` from the ui pane `createWtshuntTab` set up.
+// the pane it's running in is itself already inside the "portful" tab — e.g.
+// a user who pressed `s`/`p` from the ui pane `createPortfulTab` set up.
 // herdr doesn't expose a tab's own label directly, so this is detected via
 // `HERDR_TAB_ID` against `tab list`'s own `tab_id`s (confirmed by hands-on
 // testing to be present in a plain pane's env, unlike `HERDR_PLUGIN_ID`,
 // which is plugin-entrypoint-only).
 
 test(
-  'herdrMux.open (tab-inner mode): (f) inside its own "wtshunt" tab, a failed ui-pane label lookup falls back to treating the caller\'s own pane as the ui pane, splitting it downward at 30%; a later open with a higher order then reuses the tracked pane rightward',
+  'herdrMux.open (tab-inner mode): (f) inside its own "portful" tab, a failed ui-pane label lookup falls back to treating the caller\'s own pane as the ui pane, splitting it downward at 30%; a later open with a higher order then reuses the tracked pane rightward',
   async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-tabinner-'));
+    const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-tabinner-'));
     const saved = saveHerdrOpenTestEnv();
     try {
       const { herdrBin, logFile, tabsStateFile, layoutStateFile } = await setUpHerdrOpenTest(dir);
       process.env.HERDR_TAB_ID = 't1';
       process.env.HERDR_WORKSPACE_ID = 'w1';
-      process.env.HERDR_PANE_ID = 'p1'; // this wtshunt ui's own pane — the tab's only pane so far
+      process.env.HERDR_PANE_ID = 'p1'; // this portful ui's own pane — the tab's only pane so far
 
-      await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 't1', label: 'wtshunt' }]));
-      // Own pane is the only one in the tab and isn't labeled "wtshunt-ui" —
+      await writeFile(tabsStateFile, JSON.stringify([{ tab_id: 't1', label: 'portful' }]));
+      // Own pane is the only one in the tab and isn't labeled "portful-ui" —
       // e.g. this tab predates that convention, or the label lookup itself
       // simply doesn't match.
       await writeFile(layoutStateFile, JSON.stringify([{ pane_id: 'p1', rect: { x: 0, y: 0 } }]));
@@ -1304,8 +1304,8 @@ test(
   }
 );
 
-test('herdrMux.open (tab-inner mode): (g) when its own tab is not labeled "wtshunt", falls back to the ordinary flow', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-tabinner-'));
+test('herdrMux.open (tab-inner mode): (g) when its own tab is not labeled "portful", falls back to the ordinary flow', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-tabinner-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile, tabsStateFile } = await setUpHerdrOpenTest(dir);
@@ -1320,7 +1320,7 @@ test('herdrMux.open (tab-inner mode): (g) when its own tab is not labeled "wtshu
     await mux.open({ title: 'first', command: 'echo 1', order: 0 });
 
     const calls = await readStubLog(logFile);
-    assert.equal(callsMatching(calls, 'tab', 'list').length, 1, "checked, but this pane's own tab isn't labeled wtshunt");
+    assert.equal(callsMatching(calls, 'tab', 'list').length, 1, "checked, but this pane's own tab isn't labeled portful");
     assert.equal(callsMatching(calls, 'pane', 'layout').length, 0);
     assert.equal(callsMatching(calls, 'pane', 'get').length, 0);
     const splits = callsMatching(calls, 'pane', 'split');
@@ -1334,7 +1334,7 @@ test('herdrMux.open (tab-inner mode): (g) when its own tab is not labeled "wtshu
 });
 
 test('herdrMux.open (tab-inner mode): falls back to the ordinary flow when HERDR_WORKSPACE_ID is unset', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-tabinner-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-tabinner-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -1358,7 +1358,7 @@ test('herdrMux.open (tab-inner mode): falls back to the ordinary flow when HERDR
 });
 
 test('herdrMux.open (tab-inner mode): falls back to the ordinary flow when tab list fails', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-mux-herdr-tabinner-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-mux-herdr-tabinner-'));
   const saved = saveHerdrOpenTestEnv();
   try {
     const { herdrBin, logFile } = await setUpHerdrOpenTest(dir);
@@ -1419,7 +1419,7 @@ test('cmuxMux: detects only when a CMUX_* env var is set AND the binary resolves
 
     // Env var set, but the "binary" doesn't resolve on $PATH.
     process.env.CMUX_SOCKET_PATH = '/tmp/whatever.sock';
-    assert.equal(cmuxMux({ cmuxBin: 'wtshunt-definitely-not-a-real-binary-xyz' }).detect(), false);
+    assert.equal(cmuxMux({ cmuxBin: 'portful-definitely-not-a-real-binary-xyz' }).detect(), false);
 
     // Env var set and the stand-in binary does resolve.
     assert.equal(cmuxMux({ cmuxBin: 'ls' }).detect(), true);
@@ -1453,8 +1453,8 @@ test(
   'tmuxMux: opens a new window in a private, isolated tmux server (never the real one)',
   { skip: !hasTmux ? 'tmux is not installed' : false },
   async () => {
-    const socketName = `wtshunt-test-${process.pid}-${Date.now()}`;
-    const sessionName = 'wtshunt-test-session';
+    const socketName = `portful-test-${process.pid}-${Date.now()}`;
+    const sessionName = 'portful-test-session';
 
     await execFileAsync('tmux', [
       '-L',
@@ -1498,8 +1498,8 @@ test(
   'tmuxMux: forwards XDG_CONFIG_HOME/XDG_STATE_HOME via -e, since new-window does not inherit this process\'s env',
   { skip: !hasTmux ? 'tmux is not installed' : false },
   async () => {
-    const socketName = `wtshunt-test-env-${process.pid}-${Date.now()}`;
-    const sessionName = 'wtshunt-test-env-session';
+    const socketName = `portful-test-env-${process.pid}-${Date.now()}`;
+    const sessionName = 'portful-test-env-session';
 
     // Created before we set the XDG_* vars below, so the private server's
     // own stored environment never has them — anything the new window
@@ -1520,10 +1520,10 @@ test(
       '24',
     ]);
 
-    const outFile = join(await mkdtemp(join(tmpdir(), 'wtshunt-mux-tmux-env-')), 'out.txt');
+    const outFile = join(await mkdtemp(join(tmpdir(), 'portful-mux-tmux-env-')), 'out.txt');
     const saved = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
-    process.env.XDG_CONFIG_HOME = '/tmp/wtshunt-test-config';
-    process.env.XDG_STATE_HOME = '/tmp/wtshunt-test-state';
+    process.env.XDG_CONFIG_HOME = '/tmp/portful-test-config';
+    process.env.XDG_STATE_HOME = '/tmp/portful-test-state';
 
     try {
       const mux = tmuxMux({ socketName, targetSession: sessionName });
@@ -1536,7 +1536,7 @@ test(
       // The spawned shell needs a beat to actually run and write the file.
       await new Promise((r) => setTimeout(r, 500));
       const content = await readFile(outFile, 'utf8');
-      assert.equal(content.trim(), '/tmp/wtshunt-test-config|/tmp/wtshunt-test-state');
+      assert.equal(content.trim(), '/tmp/portful-test-config|/tmp/portful-test-state');
     } finally {
       if (saved.XDG_CONFIG_HOME === undefined) {
         delete process.env.XDG_CONFIG_HOME;

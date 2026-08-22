@@ -37,7 +37,7 @@ export async function resolvePortRef(config: Config, state: State, refRepoName: 
   if (!activeWorktree) {
     throw new Error(
       `Cannot resolve {${refRepoName}.port}: repo "${refRepoName}" has no active worktree. ` +
-        `Run "wtshunt use ${refRepoName}/<worktree>" or "wtshunt task use <name>" first.`
+        `Run "portful use ${refRepoName}/<worktree>" or "portful task use <name>" first.`
     );
   }
 

@@ -26,7 +26,7 @@ export interface UiMessage {
 
 /**
  * `●` for "something is actually running here", `○` for "it isn't", `◐`
- * for "`wtshunt ui` just started it and hasn't observed it running yet"
+ * for "`portful ui` just started it and hasn't observed it running yet"
  * (see `ui/model.ts`'s `prunePending`) — lets a glance at the list answer
  * that before reading any pid/proxy text. `◐` deliberately carries no
  * color of its own, same as `●`/`○` — it's just a third state of the same
@@ -106,7 +106,7 @@ function formatMessageLine(message: UiMessage): string {
  * when there's nothing to say, so its absence never moves the help line
  * below it), and a help line listing only the keys that do something on
  * the selected row. `pendingKeys` — `ui/model.ts`'s `pendingKey`-shaped
- * set of rows `wtshunt ui` just started and hasn't observed running yet —
+ * set of rows `portful ui` just started and hasn't observed running yet —
  * overrides those rows' `●`/`○` indicator with `◐`; defaults to empty so
  * every existing caller/test that doesn't care about the indicator is
  * unaffected. Pure function of its inputs, so it's testable without a

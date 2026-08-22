@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import { ensureRepoState, getStatePath, readState, withState } from '../src/state.ts';
 
 async function withTempState<T>(fn: () => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'wtshunt-state-'));
+  const dir = await mkdtemp(join(tmpdir(), 'portful-state-'));
   const original = process.env.XDG_STATE_HOME;
   process.env.XDG_STATE_HOME = dir;
   try {

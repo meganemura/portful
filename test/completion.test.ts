@@ -11,14 +11,14 @@ import { withState } from '../src/state.ts';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd });
 }
 
 async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-completion-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-completion-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -29,10 +29,10 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
   await git(main, ['commit', '-q', '-m', 'init']);
   await git(main, ['worktree', 'add', '-q', '-b', 'feature/auth', join(base, 'feature-auth')]);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-completion-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-completion-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.b]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
       '\n'
     )
@@ -41,7 +41,7 @@ async function makeRepoFixture(): Promise<{ base: string; configDir: string }> {
   return { base, configDir };
 }
 
-/** Runs `wtshunt --get-yargs-completions ...` and returns the suggested completions, one per line. */
+/** Runs `portful --get-yargs-completions ...` and returns the suggested completions, one per line. */
 async function getCompletions(
   configDir: string,
   args: string[],
@@ -60,7 +60,7 @@ async function getCompletions(
 
   const { stdout } = await execFileAsync(
     process.execPath,
-    [binPath, '--get-yargs-completions', 'wtshunt', ...args],
+    [binPath, '--get-yargs-completions', 'portful', ...args],
     { env }
   );
   return stdout.split('\n').filter((line) => line.length > 0);
@@ -68,7 +68,7 @@ async function getCompletions(
 
 /** Seeds state.json (under a fresh tmp XDG_STATE_HOME) with the given task names, returning that dir. */
 async function makeStateDirWithTasks(taskNames: string[]): Promise<string> {
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-completion-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-completion-state-'));
   const original = process.env.XDG_STATE_HOME;
   process.env.XDG_STATE_HOME = stateDir;
   try {
@@ -90,7 +90,7 @@ async function makeStateDirWithTasks(taskNames: string[]): Promise<string> {
 test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "wtshunt <Tab>": rest = [wtshunt] (zsh omits the not-yet-started, empty
+    // "portful <Tab>": rest = [portful] (zsh omits the not-yet-started, empty
     // current word), COMP_CWORD=1 points one past the end of rest.
     assert.deepEqual(await getCompletions(configDir, [], 1), [
       'use',
@@ -108,12 +108,12 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'completion',
     ]);
 
-    // "wtshunt use <Tab>": rest = [wtshunt, use], COMP_CWORD=2. First-argument
+    // "portful use <Tab>": rest = [portful, use], COMP_CWORD=2. First-argument
     // candidates are every repo name plus every repo/worktree name, flat.
     const afterUse = await getCompletions(configDir, ['use'], 2);
     assert.deepEqual(afterUse.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
 
-    // "wtshunt use b/<Tab>": rest = [wtshunt, use, b/] (the partial text "b/"
+    // "portful use b/<Tab>": rest = [portful, use, b/] (the partial text "b/"
     // is real, non-empty text, so zsh does include it), COMP_CWORD=2 pointing
     // at that element directly.
     const afterUseRepoSlash = await getCompletions(configDir, ['use', 'b/'], 2);
@@ -127,7 +127,7 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
 test('completion: bash-style invocation (trailing word present) uses COMP_CWORD', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "wtshunt <Tab>": rest = [wtshunt, ''] (bash always appends the current
+    // "portful <Tab>": rest = [portful, ''] (bash always appends the current
     // word, empty or not), COMP_CWORD=1 points at that empty element.
     const topLevel = await getCompletions(configDir, [''], 1);
     assert.deepEqual(topLevel, [
@@ -146,11 +146,11 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
       'completion',
     ]);
 
-    // "wtshunt use <Tab>": rest = [wtshunt, use, ''], COMP_CWORD=2.
+    // "portful use <Tab>": rest = [portful, use, ''], COMP_CWORD=2.
     const afterUse = await getCompletions(configDir, ['use', ''], 2);
     assert.deepEqual(afterUse.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
 
-    // "wtshunt use b/<Tab>": rest = [wtshunt, use, b/], COMP_CWORD=2.
+    // "portful use b/<Tab>": rest = [portful, use, b/], COMP_CWORD=2.
     const afterUseRepoSlash = await getCompletions(configDir, ['use', 'b/'], 2);
     assert.deepEqual(afterUseRepoSlash.sort(), ['b/feature-auth', 'b/main'].sort());
   } finally {
@@ -173,11 +173,11 @@ test('completion: falls back to last-word-is-current when COMP_CWORD is absent',
 test('completion: first argument is prefix-filtered across repo and worktree names', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "wtshunt run b/fe<Tab>": only worktrees under "b" starting with "fe".
+    // "portful run b/fe<Tab>": only worktrees under "b" starting with "fe".
     const feMatches = await getCompletions(configDir, ['run', 'b/fe'], 2);
     assert.deepEqual(feMatches, ['b/feature-auth']);
 
-    // "wtshunt use b<Tab>": everything starts with "b" here, so all of them.
+    // "portful use b<Tab>": everything starts with "b" here, so all of them.
     const bMatches = await getCompletions(configDir, ['use', 'b'], 2);
     assert.deepEqual(bMatches.sort(), ['b', 'b/feature-auth', 'b/main'].sort());
   } finally {
@@ -204,7 +204,7 @@ test('completion: prune\'s first argument suggests bare repo names only, not rep
 test('completion: first argument with no matches returns empty (falls through to shell default)', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "wtshunt run rails<Tab>": no repo/worktree starts with "rails", so this
+    // "portful run rails<Tab>": no repo/worktree starts with "rails", so this
     // must come back empty rather than some fallback list — that's what lets
     // zsh's `_default` take over and offer ordinary command/file completion.
     const noMatches = await getCompletions(configDir, ['run', 'rails'], 2);
@@ -218,7 +218,7 @@ test('completion: first argument with no matches returns empty (falls through to
 test('completion: second argument onward is always empty, for any command', async () => {
   const { base, configDir } = await makeRepoFixture();
   try {
-    // "wtshunt run b <Tab>": the repo has already been chosen; from here on
+    // "portful run b <Tab>": the repo has already been chosen; from here on
     // it's an arbitrary command, so completion must fall through to the
     // shell's normal file/command completion (e.g. `run b bin/<Tab>`).
     const afterRepo = await getCompletions(configDir, ['run', 'b', ''], 3);
@@ -330,7 +330,7 @@ test('help: shows the same output as top-level --help', async () => {
     execFileAsync(process.execPath, [binPath, '--help']),
   ]);
   assert.equal(helpOut, topLevelOut);
-  assert.match(helpOut, /wtshunt use \[repo\]/);
+  assert.match(helpOut, /portful use \[repo\]/);
 });
 
 test('help <command>: shows that command\'s own help', async () => {
@@ -340,7 +340,7 @@ test('help <command>: shows that command\'s own help', async () => {
 
 test('help run: shows run\'s own usage synopsis', async () => {
   const { stdout } = await execFileAsync(process.execPath, [binPath, 'help', 'run']);
-  assert.match(stdout, /Usage: wtshunt run \[repo\[\/worktree\]\] <cmd\.\.\.>/);
+  assert.match(stdout, /Usage: portful run \[repo\[\/worktree\]\] <cmd\.\.\.>/);
 });
 
 test('help <unknown command>: fails the same way a bare unknown command would', async () => {
@@ -358,12 +358,12 @@ test('completion script: zsh output self-initializes compsys and registers compd
     env: { ...process.env, SHELL: '/bin/zsh' },
   });
 
-  assert.match(stdout, /###-begin-wtshunt-completions-###/);
-  assert.match(stdout, /###-end-wtshunt-completions-###/);
+  assert.match(stdout, /###-begin-portful-completions-###/);
+  assert.match(stdout, /###-end-portful-completions-###/);
   assert.match(stdout, /autoload -Uz compinit/);
   assert.match(stdout, /compinit/);
-  assert.match(stdout, /compdef _wtshunt_yargs_completions wtshunt/);
-  assert.match(stdout, /wtshunt --get-yargs-completions "\$\{words\[@\]\}"/);
+  assert.match(stdout, /compdef _portful_yargs_completions portful/);
+  assert.match(stdout, /portful --get-yargs-completions "\$\{words\[@\]\}"/);
   // Upstream yargs has a stray quote here ("'${zsh_eval_context...").
   assert.doesNotMatch(stdout, /"'\$\{zsh_eval_context/);
 });
@@ -373,15 +373,15 @@ test('completion script: bash output uses complete -F with no init guard', async
     env: { ...process.env, SHELL: '/bin/bash' },
   });
 
-  assert.match(stdout, /###-begin-wtshunt-completions-###/);
-  assert.match(stdout, /###-end-wtshunt-completions-###/);
-  assert.match(stdout, /complete -o bashdefault -o default -F _wtshunt_yargs_completions wtshunt/);
+  assert.match(stdout, /###-begin-portful-completions-###/);
+  assert.match(stdout, /###-end-portful-completions-###/);
+  assert.match(stdout, /complete -o bashdefault -o default -F _portful_yargs_completions portful/);
   assert.doesNotMatch(stdout, /compinit/);
 });
 
 test('completion script: the hidden completion-script command does not appear in --help', async () => {
   const { stdout } = await execFileAsync(process.execPath, [binPath, '--help']);
-  assert.match(stdout, /wtshunt completion\s/);
+  assert.match(stdout, /portful completion\s/);
   assert.doesNotMatch(stdout, /completion-script/);
 });
 
@@ -393,7 +393,7 @@ test('completion: emits nothing on stderr even when the internal re-parse fails 
     // to stderr and smear over the user's prompt on every <Tab>.
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
-      [binPath, '--get-yargs-completions', 'wtshunt', 'task', 'u'],
+      [binPath, '--get-yargs-completions', 'portful', 'task', 'u'],
       { env: { ...process.env, XDG_CONFIG_HOME: configDir, COMP_CWORD: '2' } }
     );
     assert.deepEqual(

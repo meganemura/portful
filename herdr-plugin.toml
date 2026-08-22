@@ -1,8 +1,8 @@
-id = "wtshunt"
-name = "wtshunt"
+id = "portful"
+name = "portful"
 version = "0.1.0"
 min_herdr_version = "0.7.0"
-description = "Open wtshunt ui as an overlay to switch git worktrees from anywhere"
+description = "Open portful ui as an overlay to switch git worktrees from anywhere"
 platforms = ["linux", "macos"]
 
 # Runs on `herdr plugin install` (GitHub installs); `herdr plugin link`
@@ -12,15 +12,15 @@ command = ["npm", "install"]
 
 [[panes]]
 id = "ui"
-title = "wtshunt ui"
+title = "portful ui"
 placement = "overlay"
-command = ["./bin/wtshunt.js", "ui"]
+command = ["./bin/portful.js", "ui"]
 
 # Keybinding target: herdr keys only support type = "plugin_action", so
 # this action exists to open the pane above. Bind it in herdr's
-# config.toml with command = "wtshunt.ui".
+# config.toml with command = "portful.ui".
 [[actions]]
 id = "ui"
-title = "Open wtshunt ui"
+title = "Open portful ui"
 contexts = ["workspace"]
-command = ["herdr", "plugin", "pane", "open", "--plugin", "wtshunt", "--entrypoint", "ui", "--focus"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "portful", "--entrypoint", "ui", "--focus"]

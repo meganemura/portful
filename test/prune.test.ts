@@ -107,7 +107,7 @@ interface Fixture {
 }
 
 async function makeFixture(): Promise<Fixture> {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-prune-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-prune-repo-'));
 
   const apiMain = join(base, 'api-main');
   await mkdir(apiMain, { recursive: true });
@@ -129,10 +129,10 @@ async function makeFixture(): Promise<Fixture> {
   await git(frontMain, ['add', '.']);
   await git(frontMain, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-prune-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-prune-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     [
       '[repos.api]',
       `path = "${apiMain}"`,
@@ -149,7 +149,7 @@ async function makeFixture(): Promise<Fixture> {
     ].join('\n')
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-prune-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-prune-state-'));
 
   return { base, configDir, stateDir, apiMain, apiTaskB, frontMain };
 }
@@ -171,7 +171,7 @@ async function withFixtureEnv<T>(fn: (fixture: Fixture) => Promise<T>): Promise<
 }
 
 async function readStateFile(stateDir: string): Promise<State> {
-  const raw = await readFile(join(stateDir, 'wtshunt', 'state.json'), 'utf8');
+  const raw = await readFile(join(stateDir, 'portful', 'state.json'), 'utf8');
   return JSON.parse(raw) as State;
 }
 

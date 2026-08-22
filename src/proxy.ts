@@ -97,7 +97,7 @@ async function resolveActiveServer(repoName: string): Promise<ActiveServerLookup
     return {
       ok: false,
       activeName: undefined,
-      message: `No active worktree set for repo "${repoName}". Run "wtshunt use ${repoName}/<worktree>".`,
+      message: `No active worktree set for repo "${repoName}". Run "portful use ${repoName}/<worktree>".`,
     };
   }
 
@@ -106,7 +106,7 @@ async function resolveActiveServer(repoName: string): Promise<ActiveServerLookup
     return {
       ok: false,
       activeName,
-      message: `Server for worktree "${activeName}" is not running. Start it with "wtshunt serve".`,
+      message: `Server for worktree "${activeName}" is not running. Start it with "portful serve".`,
     };
   }
 
@@ -132,7 +132,7 @@ async function handleRequest(
   const headers = usesTls ? { ...req.headers, 'x-forwarded-proto': 'https' } : req.headers;
 
   const onProxyResponse = (proxyRes: IncomingMessage) => {
-    res.setHeader('X-Wtshunt-Worktree', activeName);
+    res.setHeader('X-Portful-Worktree', activeName);
     res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
     proxyRes.pipe(res);
   };
@@ -166,7 +166,7 @@ async function handleRequest(
     send502(
       res,
       activeName,
-      `Failed to reach server for worktree "${activeName}" on port ${entry.port}. Start it with "wtshunt serve".`
+      `Failed to reach server for worktree "${activeName}" on port ${entry.port}. Start it with "portful serve".`
     );
   });
 
@@ -174,7 +174,7 @@ async function handleRequest(
 }
 
 function send502(res: ServerResponse, worktree: string | undefined, message: string): void {
-  res.setHeader('X-Wtshunt-Worktree', worktree ?? '(none)');
+  res.setHeader('X-Portful-Worktree', worktree ?? '(none)');
   res.writeHead(502, { 'Content-Type': 'text/plain' });
   res.end(message);
 }
@@ -188,7 +188,7 @@ function send502(res: ServerResponse, worktree: string | undefined, message: str
  * their own (ActionCable, HMR) pick up the new target the moment they do.
  *
  * The 101 response from upstream is relayed byte-for-byte; unlike the plain
- * HTTP path, no `X-Wtshunt-Worktree` header is injected into it, since doing
+ * HTTP path, no `X-Portful-Worktree` header is injected into it, since doing
  * that would require parsing and rewriting the raw handshake response for a
  * benefit that doesn't justify the complexity.
  */
@@ -256,7 +256,7 @@ async function handleUpgrade(
     } else {
       sendRawBadGateway(
         socket,
-        `Failed to reach server for worktree "${activeName}" on port ${entry.port}. Start it with "wtshunt serve".`
+        `Failed to reach server for worktree "${activeName}" on port ${entry.port}. Start it with "portful serve".`
       );
       upstream.destroy();
     }

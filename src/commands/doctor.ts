@@ -32,7 +32,7 @@ export async function doctorCommand(): Promise<void> {
 
   const repoRoot = resolveRepoRootFromBin(process.argv[1]);
   const versionString = formatVersionString(readPackageVersion(repoRoot), readCommitHash(repoRoot));
-  lines.push(`wtshunt ${versionString}`);
+  lines.push(`portful ${versionString}`);
   lines.push(`Node ${process.version}`);
   lines.push(`Platform: ${process.platform}`);
   lines.push('');
@@ -125,7 +125,7 @@ export async function doctorCommand(): Promise<void> {
       lines.push('  no stale entries');
     } else {
       hasProblem = true;
-      lines.push('  stale entries found (run "wtshunt prune" to clean up):');
+      lines.push('  stale entries found (run "portful prune" to clean up):');
       for (const line of describeStaleReport(staleReport)) {
         lines.push(`    ${line}`);
       }

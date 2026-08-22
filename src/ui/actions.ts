@@ -1,5 +1,5 @@
 import type { Mux } from '../mux.ts';
-import { fallbackMessage, wtshuntCommand } from '../mux.ts';
+import { fallbackMessage, portfulCommand } from '../mux.ts';
 import type { Overview } from '../overview.ts';
 import type { SetActiveResult } from '../commands/use.ts';
 import type { TaskUseResult } from '../commands/task.ts';
@@ -135,7 +135,7 @@ export function invalidKeyHint(row: UiRow | undefined, key: string): string {
 /**
  * The `pendingKey` (see `ui/model.ts`) of the row `action` is about to
  * *stop*, if any -- the stop-side counterpart to `ActionDeps.onStart`
- * below, but called by `wtshunt ui`'s key handler itself, before
+ * below, but called by `portful ui`'s key handler itself, before
  * `executeAction` runs, rather than by `executeAction` after the fact.
  * Stopping (unlike starting) has no "did it actually do anything" guard to
  * wait for -- `x`/stop-side-Enter always sends the signal, and
@@ -185,11 +185,11 @@ export interface ActionDeps {
    * (nothing was actually started on the user's behalf, just a command
    * printed for them to run by hand). `key` is `pendingKey`-shaped: the
    * bare repo for a proxy start, `repo/worktree` for a serve/direct start.
-   * `wtshunt ui` (the only real caller) uses this to record the `◐`
+   * `portful ui` (the only real caller) uses this to record the `◐`
    * "starting up" indicator's start time; optional so the rest of this
    * module's test suite, which doesn't care about that indicator, can omit
    * it. For `restart`, this fires for the same key `pendingStopEffect`
-   * (below) already recorded as a *stop* pending entry -- `wtshunt ui`
+   * (below) already recorded as a *stop* pending entry -- `portful ui`
    * overwrites it in place, flipping the entry's kind from `'stop'` to
    * `'start'` rather than leaving two competing entries.
    */
@@ -220,7 +220,7 @@ function rowOrder(overview: Overview, predicate: (row: UiRow) => boolean): numbe
 
 async function openServe(overview: Overview, deps: ActionDeps, repo: string, worktree: string): Promise<string> {
   const cwd = worktreePath(overview, repo, worktree);
-  const command = wtshuntCommand('serve', `${repo}/${worktree}`);
+  const command = portfulCommand('serve', `${repo}/${worktree}`);
   const order = rowOrder(overview, (row) => row.kind === 'worktree' && row.repo === repo && row.worktree === worktree);
   const options = {
     title: `${repo}/${worktree}`,
@@ -239,7 +239,7 @@ async function openServe(overview: Overview, deps: ActionDeps, repo: string, wor
 /** `d`'s counterpart to `openServe`: same pane-opening mechanics, but runs `serve --direct` instead. */
 async function openDirect(overview: Overview, deps: ActionDeps, repo: string, worktree: string): Promise<string> {
   const cwd = worktreePath(overview, repo, worktree);
-  const command = wtshuntCommand('serve', `${repo}/${worktree}`, '--direct');
+  const command = portfulCommand('serve', `${repo}/${worktree}`, '--direct');
   const order = rowOrder(overview, (row) => row.kind === 'worktree' && row.repo === repo && row.worktree === worktree);
   const options = {
     title: `${repo}/${worktree} (direct)`,
@@ -289,9 +289,9 @@ export function pendingMessage(action: Action): string {
  * Performs the effect of `action` against the given `Overview` snapshot
  * and returns the one-line message to show in the message line. Executes
  * `use`/`stop`/`task use` in-process via the injected functions, but always
- * opens `serve`/`proxy` externally through `deps.mux` — `wtshunt ui` never
+ * opens `serve`/`proxy` externally through `deps.mux` — `portful ui` never
  * runs them itself, keeping them the same kind of foreground process a
- * plain `wtshunt serve`/`wtshunt proxy` invocation would be.
+ * plain `portful serve`/`portful proxy` invocation would be.
  */
 export async function executeAction(action: Action, overview: Overview, deps: ActionDeps): Promise<string> {
   switch (action.type) {
@@ -361,7 +361,7 @@ export async function executeAction(action: Action, overview: Overview, deps: Ac
         return `Sent SIGTERM to proxy for "${action.repo}" (pid ${pid}).`;
       }
       const cwd = repoPath(overview, action.repo);
-      const command = wtshuntCommand('proxy', action.repo);
+      const command = portfulCommand('proxy', action.repo);
       const order = rowOrder(overview, (row) => row.kind === 'repo' && row.repo === action.repo);
       const options = {
         title: `${action.repo}/proxy`,

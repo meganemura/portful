@@ -24,7 +24,7 @@ function tryListen(port: number, host: string): Promise<BindAttempt> {
 /**
  * A single bind test on `127.0.0.1` lets a process listening on `0.0.0.0` or
  * on an IPv6-only address slip past undetected, leaving two processes bound
- * to what wtshunt thinks is one free port. Binding the IPv4 and IPv6
+ * to what portful thinks is one free port. Binding the IPv4 and IPv6
  * wildcard addresses instead catches both; only a genuine "IPv6 isn't
  * available on this machine at all" error (EAFNOSUPPORT) is excused, since
  * that isn't evidence the port itself is taken.

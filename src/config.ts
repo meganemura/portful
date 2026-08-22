@@ -26,7 +26,7 @@ export interface RepoConfig {
   https?: RepoHttpsConfig;
 }
 
-/** Optional `[ui]` section configuring how `wtshunt ui` opens serve/proxy panes. */
+/** Optional `[ui]` section configuring how `portful ui` opens serve/proxy panes. */
 export interface UiConfig {
   /**
    * Shell template overriding multiplexer auto-detection (herdr, cmux, tmux),
@@ -67,7 +67,7 @@ serve = "API_URL=http://127.0.0.1:{api.port} PORT={port} npm run dev"
 
 export function getConfigPath(): string {
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return join(base, 'wtshunt', 'config.toml');
+  return join(base, 'portful', 'config.toml');
 }
 
 function expandTilde(path: string): string {
@@ -174,7 +174,7 @@ function validatePickerConfig(value: unknown, configPath: string): PickerConfig 
  * already validated individually: no two repos may share a `fixed_port`,
  * no two `port_range`s may overlap, and no repo's `fixed_port` may fall
  * inside any repo's `port_range` (including its own) — each of those
- * would let `wtshunt serve`'s port allocator or the fixed-port proxy
+ * would let `portful serve`'s port allocator or the fixed-port proxy
  * silently collide with another repo's traffic.
  */
 function validatePortCollisions(repos: Record<string, RepoConfig>, configPath: string): void {
@@ -253,7 +253,7 @@ function validateRepoConfig(name: string, value: unknown, configPath: string): R
   if (!v.serve.includes('{port}')) {
     throw new Error(
       `repos.${name}.serve must contain the literal placeholder "{port}" in ${configPath}. ` +
-        `Without it, the server won't bind the port wtshunt assigned, and "wtshunt status" and the proxy ` +
+        `Without it, the server won't bind the port portful assigned, and "portful status" and the proxy ` +
         `will have no way to know which port it actually ended up on.`
     );
   }
@@ -275,7 +275,7 @@ function validateRepoConfig(name: string, value: unknown, configPath: string): R
  * is almost certainly a typo, so fail fast rather than silently falling
  * back to plain http. Existence (not readability of content, which happens
  * at proxy start) is checked here so a bad path surfaces at config-load
- * time rather than mid-`wtshunt proxy`.
+ * time rather than mid-`portful proxy`.
  */
 function validateHttpsConfig(name: string, value: unknown, configPath: string): RepoHttpsConfig {
   if (typeof value !== 'object' || value === null) {

@@ -23,7 +23,7 @@ interface Fixture {
 }
 
 async function makeFixture(): Promise<Fixture> {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-task-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-task-repo-'));
 
   const apiMain = join(base, 'api-main');
   await mkdir(apiMain, { recursive: true });
@@ -45,10 +45,10 @@ async function makeFixture(): Promise<Fixture> {
   await git(frontMain, ['add', '.']);
   await git(frontMain, ['commit', '-q', '-m', 'init']);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-task-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-task-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     [
       '[repos.api]',
       `path = "${apiMain}"`,
@@ -65,7 +65,7 @@ async function makeFixture(): Promise<Fixture> {
     ].join('\n')
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-task-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-task-state-'));
 
   return { base, configDir, stateDir, apiMain, apiFeatureX };
 }

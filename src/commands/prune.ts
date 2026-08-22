@@ -73,7 +73,7 @@ export async function pruneCommand(args: PruneArgs = {}): Promise<void> {
       } else if (result.status === 'timeout') {
         console.error(
           `  ${r.repo}/${wt}: sent SIGTERM but pid ${result.pid} is still running; left in place. ` +
-            `Check "wtshunt status" and stop it manually.`
+            `Check "portful status" and stop it manually.`
         );
       }
       // 'no-server': the entry vanished between detection and now (e.g. it

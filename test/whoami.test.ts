@@ -11,7 +11,7 @@ import { ensureRepoState, withState } from '../src/state.ts';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 async function git(cwd: string, args: string[]): Promise<void> {
   await execFileAsync('git', args, { cwd });
@@ -26,7 +26,7 @@ interface Fixture {
 }
 
 async function makeFixture(): Promise<Fixture> {
-  const base = await mkdtemp(join(tmpdir(), 'wtshunt-whoami-repo-'));
+  const base = await mkdtemp(join(tmpdir(), 'portful-whoami-repo-'));
   const main = join(base, 'main');
   await mkdir(main, { recursive: true });
   await git(main, ['init', '-q', '-b', 'main']);
@@ -39,16 +39,16 @@ async function makeFixture(): Promise<Fixture> {
   const worktree = join(base, 'feature-auth');
   await git(main, ['worktree', 'add', '-q', '-b', 'feature/auth', worktree]);
 
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-whoami-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-whoami-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.api]', `path = "${main}"`, 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
       '\n'
     )
   );
 
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-whoami-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-whoami-state-'));
 
   return { base, main, worktree, configDir, stateDir };
 }
@@ -109,7 +109,7 @@ test('whoami: resolves through a symlink into a worktree subdirectory', async ()
 
 test('whoami: errors with exit 1 when cwd is outside every registered repo', async () => {
   const fixture = await makeFixture();
-  const outside = await mkdtemp(join(tmpdir(), 'wtshunt-whoami-outside-'));
+  const outside = await mkdtemp(join(tmpdir(), 'portful-whoami-outside-'));
   try {
     await assert.rejects(
       () => execFileAsync(process.execPath, [binPath, 'whoami'], { cwd: outside, env: envFor(fixture) }),

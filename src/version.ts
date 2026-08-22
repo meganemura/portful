@@ -3,7 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /**
- * wtshunt's own repo root, resolved from the *real* path of the running
+ * portful's own repo root, resolved from the *real* path of the running
  * bin script (following the symlink `npm link` creates) rather than
  * `argv[1]` as typed — so `--version` finds the right package.json/.git
  * regardless of how it was installed. `undefined` if `binArg` is missing
@@ -15,7 +15,7 @@ export function resolveRepoRootFromBin(binArg: string | undefined): string | und
   }
   try {
     const real = realpathSync(binArg);
-    // bin/wtshunt.js -> repo root is one directory up from bin/.
+    // bin/portful.js -> repo root is one directory up from bin/.
     return join(dirname(real), '..');
   } catch {
     return undefined;

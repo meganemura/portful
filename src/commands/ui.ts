@@ -47,7 +47,7 @@ function normalizeKey(str: string | undefined, key: ReadlineKey | undefined): st
 
 export async function uiCommand(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error('wtshunt ui requires an interactive terminal (TTY).');
+    throw new Error('portful ui requires an interactive terminal (TTY).');
   }
 
   const config = await loadConfig();

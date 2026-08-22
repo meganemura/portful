@@ -80,6 +80,6 @@ function printHumanReadable(overview: Overview): void {
 
   if (anyWorktreeGone) {
     console.log('');
-    console.log('Run "wtshunt prune" to clean up entries for worktrees that no longer exist.');
+    console.log('Run "portful prune" to clean up entries for worktrees that no longer exist.');
   }
 }

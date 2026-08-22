@@ -17,7 +17,7 @@ export async function proxyCommand(args: ProxyArgs): Promise<void> {
   if (occupant) {
     console.error(
       `Port ${repoConfig.fixedPort} is already in use:\n${occupant}\n\n` +
-        `Stop that process first, or check "wtshunt status" to see if a wtshunt proxy is already running.`
+        `Stop that process first, or check "portful status" to see if a portful proxy is already running.`
     );
     process.exitCode = 1;
     return;

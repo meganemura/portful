@@ -16,7 +16,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 const repoRoot = join(here, '..');
 
 test('formatVersionString: appends the hash in parens when present, else just the version', () => {
@@ -43,7 +43,7 @@ test("readPackageVersion: reads this repo's own package.json version, falls back
 
   assert.equal(readPackageVersion(undefined), '0.0.0');
 
-  const empty = await mkdtemp(join(tmpdir(), 'wtshunt-version-nopackage-'));
+  const empty = await mkdtemp(join(tmpdir(), 'portful-version-nopackage-'));
   try {
     assert.equal(readPackageVersion(empty), '0.0.0');
   } finally {
@@ -57,7 +57,7 @@ test("readCommitHash: this repo's HEAD short hash matches [0-9a-f]+, undefined o
 
   assert.equal(readCommitHash(undefined), undefined);
 
-  const notARepo = await mkdtemp(join(tmpdir(), 'wtshunt-version-notrepo-'));
+  const notARepo = await mkdtemp(join(tmpdir(), 'portful-version-notrepo-'));
   try {
     assert.equal(readCommitHash(notARepo), undefined);
   } finally {
@@ -65,7 +65,7 @@ test("readCommitHash: this repo's HEAD short hash matches [0-9a-f]+, undefined o
   }
 });
 
-test('wtshunt --version: prints "<semver> (<hash>)", overriding the plain package.json default', async () => {
+test('portful --version: prints "<semver> (<hash>)", overriding the plain package.json default', async () => {
   const { stdout } = await execFileAsync(process.execPath, [binPath, '--version'], { env: process.env });
   assert.match(stdout.trim(), /^\d+\.\d+\.\d+ \([0-9a-f]+\)$/);
 });

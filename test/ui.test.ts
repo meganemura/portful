@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 test('ui: errors gracefully (no raw-mode/alt-screen side effects) when stdin/stdout are not a TTY', async () => {
   // execFile pipes stdin/stdout, so neither is a TTY here — this exercises

@@ -49,7 +49,7 @@ export interface Overview {
 }
 
 /**
- * Collects everything `wtshunt status` (and `wtshunt ui`) display: per-repo
+ * Collects everything `portful status` (and `portful ui`) display: per-repo
  * worktrees, active pointer, sticky ports, running servers, and proxy state,
  * plus every defined task and whether it currently matches. Shared so both
  * the human-readable and `--json` status output, and the `ui` TUI's row

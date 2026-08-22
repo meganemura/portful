@@ -12,13 +12,13 @@ import { ensureRepoState, withState } from '../src/state.ts';
 const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
-const binPath = join(here, '..', 'bin', 'wtshunt.js');
+const binPath = join(here, '..', 'bin', 'portful.js');
 
 async function makeConfigDir(): Promise<string> {
-  const configDir = await mkdtemp(join(tmpdir(), 'wtshunt-stop-config-'));
-  await mkdir(join(configDir, 'wtshunt'), { recursive: true });
+  const configDir = await mkdtemp(join(tmpdir(), 'portful-stop-config-'));
+  await mkdir(join(configDir, 'portful'), { recursive: true });
   await writeFile(
-    join(configDir, 'wtshunt', 'config.toml'),
+    join(configDir, 'portful', 'config.toml'),
     ['[repos.b]', 'path = "/tmp"', 'fixed_port = 3000', 'port_range = [3101, 3199]', 'serve = "echo {port}"', ''].join(
       '\n'
     )
@@ -28,7 +28,7 @@ async function makeConfigDir(): Promise<string> {
 
 async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
   const configDir = await makeConfigDir();
-  const stateDir = await mkdtemp(join(tmpdir(), 'wtshunt-stop-state-'));
+  const stateDir = await mkdtemp(join(tmpdir(), 'portful-stop-state-'));
   const original = { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_STATE_HOME: process.env.XDG_STATE_HOME };
   process.env.XDG_CONFIG_HOME = configDir;
   process.env.XDG_STATE_HOME = stateDir;
@@ -73,7 +73,7 @@ test('stop: a normal process is confirmed dead and its entry is removed', async 
     const { stdout } = await execFileAsync(process.execPath, [binPath, 'stop', 'b'], { env: process.env });
     assert.match(stdout, /Stopped server for "main"/);
 
-    const raw = await readFile(join(process.env.XDG_STATE_HOME!, 'wtshunt', 'state.json'), 'utf8');
+    const raw = await readFile(join(process.env.XDG_STATE_HOME!, 'portful', 'state.json'), 'utf8');
     const state = JSON.parse(raw);
     assert.equal(state.repos.b.servers.main, undefined);
   });
@@ -99,12 +99,12 @@ test('stop: a SIGTERM-trapping process is left running with a warning and its en
         () => execFileAsync(process.execPath, [binPath, 'stop', 'b'], { env: process.env }),
         (err: NodeJS.ErrnoException & { stderr?: string }) => {
           assert.match(String(err.stderr), /still running/);
-          assert.match(String(err.stderr), /wtshunt status/);
+          assert.match(String(err.stderr), /portful status/);
           return true;
         }
       );
 
-      const raw = await readFile(join(process.env.XDG_STATE_HOME!, 'wtshunt', 'state.json'), 'utf8');
+      const raw = await readFile(join(process.env.XDG_STATE_HOME!, 'portful', 'state.json'), 'utf8');
       const state = JSON.parse(raw);
       assert.equal(state.repos.b.servers.main.pid, pid);
       assert.doesNotThrow(() => process.kill(pid, 0)); // still alive, unlike a normal process by now
