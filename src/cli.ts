@@ -275,6 +275,18 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       })
     )
     .command(
+      'run',
+      "Start a server for this worktree using the repo's script or serve template",
+      (y) =>
+        y.option('name', {
+          type: 'string',
+          describe: 'repo, or repo/worktree, instead of inferring it from the current directory',
+        }),
+      handle(async (argv) => {
+        await serveCommand({ repo: argv.name as string | undefined, fromCwd: true });
+      })
+    )
+    .command(
       'exec [target] [cmd..]',
       'Run a command inside a worktree (flags are passed through untouched)',
       // Disables this command's own --help/--version so a flag meant for the
@@ -604,7 +616,15 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
 
 const entryArgs = hideBin(process.argv);
 const explicit = explicitCommandForm(entryArgs);
-if (explicit) {
+if (entryArgs.length === 0) {
+  // A bare invocation starts this worktree's server, the way a bare
+  // `portless` runs the project's dev script.
+  try {
+    await serveCommand({ fromCwd: true });
+  } catch (err) {
+    reportError(err);
+  }
+} else if (explicit) {
   try {
     await serveCommand({ repo: explicit.repo, command: explicit.command });
   } catch (err) {

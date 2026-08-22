@@ -102,6 +102,7 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
     assert.deepEqual(await getCompletions(configDir, [], 1), [
       'use',
       'serve',
+      'run',
       'exec',
       'status',
       'list',
@@ -144,6 +145,7 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
     assert.deepEqual(topLevel, [
       'use',
       'serve',
+      'run',
       'exec',
       'status',
       'list',
@@ -276,6 +278,7 @@ test('completion: after "help", suggests command names (excluding help itself)',
     assert.deepEqual(afterHelp, [
       'use',
       'serve',
+      'run',
       'exec',
       'status',
       'list',

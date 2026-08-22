@@ -8,6 +8,7 @@
 export const COMMAND_NAMES = [
   'use',
   'serve',
+  'run',
   'exec',
   'status',
   'list',

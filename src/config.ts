@@ -45,6 +45,8 @@ export interface RepoConfig {
    * `portful <repo> <cmd...>` supplies its own command.
    */
   serve?: string;
+  /** The package.json script to run when no `serve` template is set. Defaults to "dev", as it does in portless. */
+  script?: string;
   https?: RepoHttpsConfig;
 }
 
@@ -263,6 +265,10 @@ async function loadRepoConfig(name: string, value: unknown, configPath: string):
     serve = merged.serve;
   }
 
+  if (merged.script !== undefined && (typeof merged.script !== 'string' || merged.script.length === 0)) {
+    throw new Error(`repos.${name}: "script" must be a non-empty string. Set it in ${where}.`);
+  }
+
   const https = merged.https !== undefined ? validateHttpsConfig(name, merged.https, where) : undefined;
 
   return {
@@ -270,6 +276,7 @@ async function loadRepoConfig(name: string, value: unknown, configPath: string):
     fixedPort: merged.fixedPort,
     portRange: [merged.portRange[0], merged.portRange[1]],
     ...(serve !== undefined ? { serve } : {}),
+    ...(merged.script !== undefined ? { script: merged.script as string } : {}),
     ...(https !== undefined ? { https } : {}),
   };
 }

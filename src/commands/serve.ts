@@ -2,8 +2,9 @@ import { spawn } from 'node:child_process';
 import { loadConfig } from '../config.ts';
 import { allocatePort, findPortOccupant } from '../ports.ts';
 import { applyPortRefs, parsePortRefs, resolvePortRef } from '../portRefs.ts';
-import { cwdActiveMismatchWarning, resolveRepo, listWorktrees, findWorktree } from '../repo.ts';
+import { cwdActiveMismatchWarning, resolveRepo, resolveWorktreeFromCwd, listWorktrees, findWorktree } from '../repo.ts';
 import { ensureRepoState, readState, withState, type ServerEntry } from '../state.ts';
+import { resolveScriptCommand } from '../startCommand.ts';
 
 const EARLY_EXIT_THRESHOLD_MS = 2000;
 
@@ -29,6 +30,14 @@ export interface ServeArgs {
    * reads its port from `PORT` rather than from a `{port}` substitution.
    */
   command?: string[];
+  /**
+   * Takes the worktree from the current directory rather than the repo's
+   * active pointer. `run` and a bare invocation set this, because portless
+   * starts the app in the directory you are standing in. `serve` leaves it
+   * unset and keeps following the active pointer, which is the pointer this
+   * tool exists to switch.
+   */
+  fromCwd?: boolean;
 }
 
 /** What either allocation path (sticky or `--direct`) hands off to the shared spawn logic below. */
@@ -44,15 +53,32 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   const worktrees = await listWorktrees(repoConfig.path);
 
   const state = await readState();
-  const targetName = worktreeName ?? state.repos[repoName]?.active;
+
+  let cwdWorktreeName: string | undefined;
+  if (worktreeName === undefined && args.fromCwd) {
+    try {
+      const match = await resolveWorktreeFromCwd(config, cwd);
+      if (match.repoName === repoName) {
+        cwdWorktreeName = match.worktree.name;
+      }
+    } catch {
+      // Standing outside every worktree is fine here; the active pointer
+      // below still answers.
+    }
+  }
+
+  const targetName = worktreeName ?? cwdWorktreeName ?? state.repos[repoName]?.active;
   if (!targetName) {
-    throw new Error(`No active worktree for repo "${repoName}". Run "portful use ${repoName}/<worktree>" first.`);
+    throw new Error(
+      `No active worktree for repo "${repoName}". Run "portful use ${repoName}/<worktree>" first, ` +
+        `or run this from inside a worktree.`
+    );
   }
 
   // Only when the target came from the active pointer (repo omitted, or
   // given bare with no explicit /worktree) — an explicit repo/worktree
   // means the user picked this on purpose, so there's nothing to warn about.
-  if (worktreeName === undefined) {
+  if (worktreeName === undefined && cwdWorktreeName === undefined) {
     const warning = await cwdActiveMismatchWarning(config, cwd, repoName, targetName);
     if (warning) {
       console.error(warning);
@@ -67,13 +93,28 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
   // An explicit command replaces the template outright, so it also carries
   // no `{<repo>.port}` references to resolve.
   const template = args.command ? undefined : repoConfig.serve;
-  if (args.command === undefined && template === undefined) {
-    throw new Error(
-      `Repo "${repoName}" has no "serve" command configured. Either add one to ` +
-        `${repoConfig.path}/portful.json, or pass the command directly: ` +
-        `portful ${repoName}/${targetName} <cmd...>`
-    );
+
+  // With neither an explicit command nor a template, fall back to the
+  // project's own dev script, which is how portless starts an app with no
+  // configuration at all.
+  let command = args.command;
+  if (command === undefined && template === undefined) {
+    const resolution = await resolveScriptCommand(worktree.path, repoConfig.script);
+    if (!resolution.found) {
+      const listed =
+        resolution.available.length > 0
+          ? `Scripts defined there: ${resolution.available.join(', ')}.`
+          : `No scripts are defined in that worktree's package.json.`;
+      throw new Error(
+        `Repo "${repoName}" has no "serve" template, and worktree "${targetName}" defines no ` +
+          `"${resolution.script}" script. ${listed} Add a "serve" template to ` +
+          `${repoConfig.path}/portful.json, name a different "script", or pass the command directly: ` +
+          `portful ${repoName}/${targetName} <cmd...>`
+      );
+    }
+    command = resolution.command;
   }
+
   const refTemplate = template ?? '';
 
   let allocation: Allocation;
@@ -168,8 +209,8 @@ export async function serveCommand(args: ServeArgs): Promise<void> {
     PORTFUL_URL: `${repoConfig.https?.cert ? 'https' : 'http'}://127.0.0.1:${repoConfig.fixedPort}`,
   };
 
-  const child = args.command
-    ? spawn(args.command[0], args.command.slice(1), {
+  const child = command
+    ? spawn(command[0], command.slice(1), {
         cwd: worktree.path,
         stdio: 'inherit',
         detached: true,
