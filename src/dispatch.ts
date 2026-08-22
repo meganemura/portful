@@ -18,6 +18,7 @@ export const COMMAND_NAMES = [
   'ui',
   'whoami',
   'prune',
+  'clean',
   'doctor',
   'migrate',
   'help',

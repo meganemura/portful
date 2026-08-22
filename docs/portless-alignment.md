@@ -33,8 +33,17 @@ Source for every portless detail below: the portless README at
 | `doctor` | `doctor` | `doctor` | same meaning |
 | `ui` | `ui` | (none) | stays |
 | `whoami` | `whoami` | (none) | stays |
-| (none) | `alias <name> <port>` | `alias` | route a name at a server this tool did not start |
-| (none) | `clean` | `clean` | remove state |
+| (none) | `clean` | `clean` | remove the state file |
+
+### `alias` is deliberately not adopted
+
+portless's `alias <name> <port>` adds one more hostname route to a proxy that
+routes by hostname. This proxy routes by active worktree on a fixed port, so
+the same word here would have to mean "pin this port to a literal number and
+ignore the active worktree", which is a different action. A shared vocabulary
+earns its keep only while a shared word means a shared thing, so this one
+stays unused. Reaching a server this tool did not start is what
+`portful <repo> <cmd...>` and a plain `serve` template already cover.
 
 portless reserves `run`, `get`, `alias`, `hosts`, `list`, `doctor`,
 `trust`, `clean`, `prune`, `proxy`, and `service` so they stay usable as
@@ -121,5 +130,7 @@ client, and one more port runs behind it for each worktree.
 3. Config. Replace TOML with JSON, move the per-repo part into each repo,
    keep the registry and tasks in the user-level file, read the
    `package.json` key. `portful migrate` converts an existing TOML config.
-4. Zero config. Infer the name, read the `package.json` script, and
-   inject `PORT` so a server can start with no `serve` template.
+4. Zero config. Read the `package.json` script and inject `PORT`, so a
+   server can start with no `serve` template.
+
+All four are done.

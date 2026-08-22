@@ -15,6 +15,7 @@ import { taskAddCommand, taskListCommand, taskRmCommand, taskUseCommand } from '
 import { uiCommand } from './commands/ui.ts';
 import { whoamiCommand } from './commands/whoami.ts';
 import { pruneCommand } from './commands/prune.ts';
+import { cleanCommand } from './commands/clean.ts';
 import { doctorCommand } from './commands/doctor.ts';
 import { migrateCommand } from './commands/migrate.ts';
 import { formatVersionString, readCommitHash, readPackageVersion, resolveRepoRootFromBin } from './version.ts';
@@ -447,6 +448,19 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
           }),
       handle(async (argv) => {
         await pruneCommand({ repo: argv.repo as string | undefined, dryRun: argv.dryRun as boolean });
+      })
+    )
+    .command(
+      'clean',
+      'Remove the state file: sticky ports, active pointers, and tasks',
+      (y) =>
+        y.option('force', {
+          type: 'boolean',
+          default: false,
+          describe: 'Remove it even while servers or a proxy are still recorded as running',
+        }),
+      handle(async (argv) => {
+        await cleanCommand({ force: argv.force as boolean });
       })
     )
     .command(
