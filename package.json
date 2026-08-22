@@ -1,7 +1,7 @@
 {
   "name": "portful",
   "version": "0.1.0",
-  "description": "Switch a fixed-port reverse proxy between git worktree servers without cd-ing around",
+  "description": "Keep one fixed port pointed at whichever git worktree is active, and switch it without restarting the client",
   "type": "module",
   "engines": {
     "node": ">=20"

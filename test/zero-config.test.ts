@@ -116,3 +116,19 @@ test('a bare invocation inside a worktree starts that worktree, the way a bare p
     await fx.cleanup();
   }
 });
+
+test('portful <repo> <cmd...>: takes the worktree from the current directory, like run does', async () => {
+  const fx = await makeFixture('positional-cwd', 42180, undefined);
+  try {
+    // No active pointer is set, so only the current directory can supply the
+    // worktree here.
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [binPath, 'e', 'sh', '-c', 'echo "positional saw PORT=$PORT"'],
+      { env: fx.env, cwd: fx.main }
+    );
+    assert.match(stdout, /positional saw PORT=4218\d/);
+  } finally {
+    await fx.cleanup();
+  }
+});

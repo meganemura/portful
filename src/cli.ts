@@ -640,7 +640,7 @@ if (entryArgs.length === 0) {
   }
 } else if (explicit) {
   try {
-    await serveCommand({ repo: explicit.repo, command: explicit.command });
+    await serveCommand({ repo: explicit.repo, command: explicit.command, fromCwd: true });
   } catch (err) {
     reportError(err);
   }
