@@ -60,6 +60,20 @@ Commands that mean the same thing carry the same name:
 | `portless doctor` | `portful doctor` |
 | `portless prune` | `portful prune` |
 | `portless clean` | `portful clean` |
+| `portless trust` | portful uses the certificates that you configure for its proxy |
+| `portless hosts sync` / `hosts clean` | portful routes through its configured fixed ports |
+| `portless service install` | run `portful proxy start` in a terminal for each proxy |
+| `portless proxy start --lan` / `--tailscale` / `--ngrok` | portful binds the loopback addresses only |
+| `portless alias <name> <port>` | `portful use <repo>/<worktree>` selects a worktree by name |
+| change each portless alias for a multi-repo context | `portful task add` / `task use` stores and selects that context |
+| change to the worktree directory and run the command | `portful exec <repo>/<worktree> <cmd...>` |
+| use the portless commands for each operation | `portful ui` provides an interactive terminal interface |
+| identify the current app from the directory and `portless list` | `portful whoami` reports the current repo and worktree |
+| run the app outside portless, on whatever port it binds | `portful serve --direct` binds the fixed port for one run, with no proxy in front |
+
+The extra portless commands install or update machine resources, such as a CA,
+host entries, a service, or network exposure. On the portful side, the extra commands pick
+the worktree or the multi-repo context to use now, and act inside it.
 
 Config follows the same layout: a `portful.json` in the repo, or a
 `"portful"` key in `package.json`, with the same precedence portless
@@ -80,6 +94,11 @@ Four things stay different, deliberately:
   it would have to mean "ignore the active worktree", which is a
   different action. `portful <repo> <cmd...>` covers reaching a server
   portful did not start.
+
+Both tools can switch a client to another worktree while its URL and cookies
+stay unchanged. With portless, run `portless list`, copy the assigned port from
+the 4000-4999 range, then run `portless alias <name> <port> --force`. With
+portful, `portful use` accepts the worktree name and resolves its port internally.
 
 ## Requirements
 
@@ -353,7 +372,7 @@ it cleanly.
 worktree exactly as it'd look bound in production, no proxy in front of
 it. It's a one-off, temporary substitution: the sticky ports map is left
 completely untouched. Refuses to start if the repo's proxy is already
-running (stop it first — otherwise both would fight over `fixedPort`),
+running (stop it first, since otherwise both would fight over `fixedPort`),
 or if something else already occupies `fixedPort` (reported via `lsof`,
 the same way `portful proxy start`'s own occupied-port check does). The
 resulting server entry in `portful status`/`portful ui` shows `fixedPort`
@@ -468,7 +487,7 @@ without leaving the screen:
   the proxy, same as `p`. On a task row: applies the task, same as `u`
   (a task row has no on/off state to toggle).
 - `s`: start a server for the selected worktree.
-- `d`: same, but `--direct` (see `portful serve --direct` above) — for
+- `d`: same, but `--direct` (see `portful serve --direct` above), for
   poking at a worktree exactly as it'd run in production, no proxy.
 - `x`: stop it.
 - `r`: restart it (stop, then start, skipping the start if the stop
@@ -481,9 +500,9 @@ Each row's leading mark is `●` when it's running and `○` when it's not.
 Right after starting or stopping a server or the proxy (`s`, `d`, `x`,
 `r`, `p`, or either side of Enter), it shows `◐` instead until the next
 automatic refresh actually observes the row in the state it's waiting
-for — then it flips to `●` or `○` accordingly — or a timeout passes with
-nothing observed (15 seconds for a start, 5 for a stop), in which case it
-falls back to the ordinary `●`/`○` indicator anyway — a start or stop
+for, at which point it flips to `●` or `○` accordingly. It also gives up
+when a timeout passes with nothing observed (15 seconds for a start, 5 for
+a stop), falling back to the ordinary `●`/`○` indicator. A start or stop
 failure is visible in the pane itself, or on the message line, so
 `portful ui` just stops waiting rather than guessing why.
 

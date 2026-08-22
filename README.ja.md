@@ -50,6 +50,19 @@ portful はリポジトリごとに固定ポートを 1 本持ち、いまアク
 | `portless doctor` | `portful doctor` |
 | `portless prune` | `portful prune` |
 | `portless clean` | `portful clean` |
+| `portless trust` | portful はプロキシに設定された証明書を使う |
+| `portless hosts sync` / `hosts clean` | portful は設定された固定ポートを通して転送する |
+| `portless service install` | プロキシごとに `portful proxy start` をターミナルで動かす |
+| `portless proxy start --lan` / `--tailscale` / `--ngrok` | portful は loopback だけを bind する |
+| `portless alias <name> <port>` | `portful use <repo>/<worktree>` は worktree を名前で選ぶ |
+| 複数リポジトリの場面では portless の各 alias を切り替える | `portful task add` / `task use` はその組み合わせを保存して選ぶ |
+| worktree のディレクトリへ移動してコマンドを実行する | `portful exec <repo>/<worktree> <cmd...>` |
+| 各操作に対応する portless コマンドを使う | `portful ui` は対話型のターミナル画面を提供する |
+| 現在のディレクトリと `portless list` からアプリを特定する | `portful whoami` は現在のリポジトリと worktree を表示する |
+| portless を通さずにアプリを起動し、そのアプリが bind したポートで待つ | `portful serve --direct` は 1 回だけ、プロキシを挟まずに固定ポートを直接 bind する |
+
+portless 側に加わるコマンドは、CA、hosts エントリ、サービス、ネットワーク公開など、マシンのリソースを設置または更新します。
+portful 側では、加わるコマンドがいま使う worktree や複数リポジトリの組み合わせを選び、その中で操作します。
 
 設定の置き方も同じです。リポジトリの中の `portful.json`、または `package.json` の `"portful"` キーを読み、優先順位も portless に合わせてあります。
 子プロセスには `PORT`、`HOST`、`PORTFUL_URL` が渡るので、すでに `PORT` を読むサーバならテンプレートなしで起動します。
@@ -60,6 +73,10 @@ portful はリポジトリごとに固定ポートを 1 本持ち、いまアク
 - **特権ポートも CA も `/etc/hosts` も使いません。** portful が書くのは自分の設定ディレクトリと状態ディレクトリだけで、あとは設定したポートを bind するだけです。管理された会社の端末でも、管理者権限なしで動きます。
 - **`proxy start` はフォアグラウンドで動きます。** プロキシ 1 本につきタブ 1 枚にすれば、リクエストログが見えたまま `Ctrl-C` が停止ボタンになります。
 - **`alias` はありません。** portless では別のホスト名ルートを足すコマンドですが、ここでは「アクティブな worktree を無視する」という別の動作になってしまいます。portful が起動していないサーバに届かせたいときは `portful <repo> <cmd...>` が担当します。
+
+どちらの道具でも、URL と cookie を保ったままクライアントの接続先を別の worktree へ切り替えられます。
+portless では `portless list` を実行し、4000-4999 から割り当てられたポートを写して、`portless alias <name> <port> --force` を実行します。
+portful では `portful use` が worktree 名を受け取り、そのポートを内部で解決します。
 
 ## 動作要件
 
