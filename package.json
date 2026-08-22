@@ -3,27 +3,46 @@
   "version": "0.1.0",
   "description": "Keep one fixed port pointed at whichever git worktree is active, and switch it without restarting the client",
   "type": "module",
+  "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "bin": {
-    "portful": "./bin/portful.js"
+    "portful": "./dist/cli.js"
   },
   "files": [
-    "bin",
-    "src"
+    "dist"
   ],
-  "scripts": {
-    "test": "node --import tsx --test test/*.test.ts"
+  "keywords": [
+    "git-worktree",
+    "worktree",
+    "local",
+    "development",
+    "proxy",
+    "localhost",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/meganemura/portful.git"
   },
-  "license": "MIT",
-  "dependencies": {
-    "yargs": "^18.0.0"
+  "homepage": "https://github.com/meganemura/portful#readme",
+  "bugs": {
+    "url": "https://github.com/meganemura/portful/issues"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run type-check && npm test && npm run build"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/yargs": "^17.0.35",
+    "tsup": "8.5.1",
     "tsx": "^4.23.1",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "yargs": "^18.0.0"
   }
 }

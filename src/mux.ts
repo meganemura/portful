@@ -983,7 +983,7 @@ export function tmuxMux(options: TmuxMuxOptions = {}): Mux {
 /** The message printed/returned by the fallback adapter, shared so `portful ui` can show it without invoking `open`'s own console output. */
 export function fallbackMessage({ title, command, cwd }: MuxOpenOptions): string {
   const cd = cwd ? `cd ${shQuote(cwd)} && ` : '';
-  return `No multiplexer detected for "${title}" — run this in another terminal: ${cd}${command}`;
+  return `No multiplexer detected for "${title}". Run this in another terminal: ${cd}${command}`;
 }
 
 /** Priority 5: no multiplexer detected and no `[ui] open` template — print guidance instead of opening anything. */
