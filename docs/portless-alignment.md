@@ -22,7 +22,7 @@ Source for every portless detail below: the portless README at
 | --- | --- | --- | --- |
 | `serve <repo>/<wt>` | `portful <name> <cmd>` | `portless <name> <cmd>` | the worktree comes from the current directory, as portless does |
 | `run <repo> <cmd>` | `exec <repo> <cmd>` | `run` means something else | see "The `run` collision" |
-| (none) | `run [--name <n>] [cmd]` | `run` | runs the configured script through the proxy |
+| (none) | `run [--name <n>]` | `run` | runs the repo's script or serve template |
 | `status` | `status` | `service status` | keeps the per-repo view: active worktree, servers, proxy |
 | (none) | `list` | `list` | routes in portless's shape: name, target, port |
 | `proxy` | `proxy start` / `proxy stop` | same | gains `-p`, `--no-tls`, `--cert`, `--key`, `--foreground` |
