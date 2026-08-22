@@ -197,11 +197,6 @@ sources, and the `package.json` key wins over `portful.json`, matching
 portless. Your machine beats the repo's suggestion, because ports are
 allocated per machine.
 
-Converting a config from before this layout: `portful migrate` reads the
-old `config.toml` and writes `config.json`. It looks under the previous
-name (`~/.config/wtshunt/config.toml`) too, and carries that state file
-across so sticky ports and task definitions survive.
-
 ### Keys
 
 - `path` (user level only) points at the repo's main checkout and
@@ -551,12 +546,6 @@ processes alive with nothing tracking them. `--force` removes it anyway.
 
 portless's `clean` also drops its CA trust and its `/etc/hosts` block.
 portful installs neither, so state is the whole of what it owns.
-
-### `portful migrate`
-
-Converts a `config.toml` from before the move to JSON into
-`config.json`, leaving the original in place. Refuses to overwrite an
-existing `config.json` unless given `--force`.
 
 ### `portful help [command]`
 

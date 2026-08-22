@@ -20,7 +20,6 @@ export const COMMAND_NAMES = [
   'prune',
   'clean',
   'doctor',
-  'migrate',
   'help',
   'completion',
 ];

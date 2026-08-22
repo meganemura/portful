@@ -17,7 +17,6 @@ import { whoamiCommand } from './commands/whoami.ts';
 import { pruneCommand } from './commands/prune.ts';
 import { cleanCommand } from './commands/clean.ts';
 import { doctorCommand } from './commands/doctor.ts';
-import { migrateCommand } from './commands/migrate.ts';
 import { formatVersionString, readCommitHash, readPackageVersion, resolveRepoRootFromBin } from './version.ts';
 
 /**
@@ -469,19 +468,6 @@ function buildCli(rawArgs: string[] = hideBin(process.argv)): Argv {
       () => {},
       handle(async () => {
         await doctorCommand();
-      })
-    )
-    .command(
-      'migrate',
-      'Convert a pre-JSON config.toml into config.json',
-      (y) =>
-        y.option('force', {
-          type: 'boolean',
-          default: false,
-          describe: 'Overwrite an existing config.json',
-        }),
-      handle(async (argv) => {
-        await migrateCommand({ force: argv.force as boolean });
       })
     )
     .command(

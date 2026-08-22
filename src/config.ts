@@ -97,41 +97,6 @@ export function getConfigPath(): string {
   return join(base, 'portful', 'config.json');
 }
 
-/**
- * Where a TOML config could be sitting: under this tool's own directory, and
- * under the name it carried before the rename. `migrate` and the not-found
- * message both look through this list so a config written by either name is
- * found.
- */
-export function legacyConfigPaths(): string[] {
-  const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return [join(base, 'portful', 'config.toml'), join(base, 'wtshunt', 'config.toml')];
-}
-
-/** The first TOML config that exists and is readable, or undefined when there is none. */
-export function findLegacyConfigPath(): string | undefined {
-  for (const path of legacyConfigPaths()) {
-    try {
-      accessSync(path, constants.R_OK);
-      return path;
-    } catch {
-      // Not this one; try the next.
-    }
-  }
-  return undefined;
-}
-
-/** Where this tool's own TOML config lived before the move to JSON. */
-export function getLegacyConfigPath(): string {
-  return legacyConfigPaths()[0];
-}
-
-/** Where the state file lived under the previous name, so `migrate` can carry sticky ports and tasks across. */
-export function legacyStatePath(): string {
-  const base = process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state');
-  return join(base, 'wtshunt', 'state.json');
-}
-
 export function repoConfigPath(repoPath: string): string {
   return join(repoPath, 'portful.json');
 }
@@ -181,12 +146,7 @@ export async function loadConfig(): Promise<Config> {
 
   const userRaw = await readJsonFile(configPath);
   if (userRaw === undefined) {
-    const legacy = findLegacyConfigPath();
-    const legacyHint =
-      legacy !== undefined ? `\n\nA TOML config still exists at ${legacy}. Run "portful migrate" to convert it.` : '';
-    throw new Error(
-      `Config file not found at ${configPath}\n\nCreate one with content like this:\n\n${SAMPLE_CONFIG}${legacyHint}`
-    );
+    throw new Error(`Config file not found at ${configPath}\n\nCreate one with content like this:\n\n${SAMPLE_CONFIG}`);
   }
 
   const reposRaw = userRaw.repos;

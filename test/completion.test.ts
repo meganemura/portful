@@ -114,7 +114,6 @@ test('completion: zsh-style invocation (no trailing word) uses COMP_CWORD', asyn
       'prune',
       'clean',
       'doctor',
-      'migrate',
       'help',
       'completion',
       // A repo name is a valid first word too, via the `<repo> <cmd...>` form.
@@ -158,7 +157,6 @@ test('completion: bash-style invocation (trailing word present) uses COMP_CWORD'
       'prune',
       'clean',
       'doctor',
-      'migrate',
       'help',
       'completion',
       // A repo name is a valid first word too, via the `<repo> <cmd...>` form.
@@ -292,7 +290,6 @@ test('completion: after "help", suggests command names (excluding help itself)',
       'prune',
       'clean',
       'doctor',
-      'migrate',
       'completion',
     ]);
   } finally {

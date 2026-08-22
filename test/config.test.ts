@@ -103,19 +103,6 @@ test('config: a missing file throws a helpful error showing a sample config', as
   }
 });
 
-test('config: a leftover TOML config turns the not-found error into a migrate hint', async () => {
-  const configRoot = await mkdtemp(join(tmpdir(), 'portful-legacy-config-'));
-  try {
-    await mkdir(join(configRoot, 'portful'), { recursive: true });
-    await writeFile(join(configRoot, 'portful', 'config.toml'), '[repos.b]\npath = "/tmp/b"\n');
-    await withEnv({ XDG_CONFIG_HOME: configRoot }, async () => {
-      await rejectsWith(/Run "portful migrate" to convert it\./);
-    });
-  } finally {
-    await rm(configRoot, { recursive: true, force: true });
-  }
-});
-
 test('config: a missing required key throws a validation error naming every place it could be set', async () => {
   const dir = await makeRepoDir('missing-key');
   try {

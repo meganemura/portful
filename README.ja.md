@@ -166,9 +166,6 @@ WebSocket 接続は、開いたときに一度だけルーティングされま�
 優先順位はひとつの規則です。ユーザ階層のエントリがリポジトリ階層の両方に勝ち、`package.json` のキーが `portful.json` に勝ちます(portless と同じ)。
 ポートはマシンごとに割り当てるものなので、手元のマシンがリポジトリの提案に勝ちます。
 
-この形になる前の設定からの移行は `portful migrate` が行います。古い `config.toml` を読んで `config.json` を書きます。
-以前の名前(`~/.config/wtshunt/config.toml`)も探し、その状態ファイルも引き継ぐので、sticky ポートとタスク定義は残ります。
-
 ### キー
 
 - `path`(ユーザ階層のみ)はリポジトリ本体のチェックアウトを指し、`~` 展開に対応します。
@@ -432,11 +429,6 @@ portful 自身のバージョン(commit hash 付き)、Node と platform、設�
 削除するとそれらのプロセスが、追跡するものが無いまま生き残ってしまうからです。`--force` を付ければ削除します。
 
 portless の `clean` は CA の信頼と `/etc/hosts` のブロックも削除しますが、portful はどちらも作らないので、状態ファイルが持ち物のすべてです。
-
-### `portful migrate`
-
-JSON へ移る前の `config.toml` を `config.json` に変換します。元のファイルはそのまま残します。
-既存の `config.json` は `--force` なしには上書きしません。
 
 ### `portful help [command]`
 

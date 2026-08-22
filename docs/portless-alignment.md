@@ -129,7 +129,7 @@ client, and one more port runs behind it for each worktree.
    positional form, adopt portless's flag names.
 3. Config. Replace TOML with JSON, move the per-repo part into each repo,
    keep the registry and tasks in the user-level file, read the
-   `package.json` key. `portful migrate` converts an existing TOML config.
+   `package.json` key.
 4. Zero config. Read the `package.json` script and inject `PORT`, so a
    server can start with no `serve` template.
 
