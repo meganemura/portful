@@ -1,6 +1,6 @@
 # portful
 
-[![npm version](https://img.shields.io/npm/v/portful)](https://www.npmjs.com/package/portful)
+[![npm version](https://img.shields.io/npm/v/portful?logo=npm)](https://www.npmjs.com/package/portful)
 
 Git worktrees let you develop several branches in parallel, but the
 client that talks to your server (say, a frontend dev server) still hits
