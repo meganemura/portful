@@ -629,7 +629,14 @@ portful task use feature-x
 ```sh
 npm install
 npm test        # node:test。テストが実際の設定や state に触れることはありません
+npm run archstrict        # archstrict.config.ts のモジュール境界と層の順序
+npm run build && npm run test:scenarios   # features/ の nukadoko シナリオを dist/cli.js に対して実行
 ```
+
+`npm run test:scenarios` は、このツールの目的である切り替えを [nukadoko](https://github.com/meganemura/nukadoko) のシナリオとして走らせます。
+2 つの worktree をそれぞれのポートで serve し、固定ポートにプロキシを置き、`portful use` で次のリクエストの行き先を移します。
+ビルドした `dist/cli.js` を、使い捨ての config と state のディレクトリで動かします。
+CI は Node 24 と 26 で、型チェック、テスト、`archstrict`、ビルド、シナリオを走らせます。
 
 チェックアウトから動かす場合、CLI は tsx 経由で `src/` の TypeScript を直接実行するので、編集にビルドは要りません。
 `npm run build` は publish のためだけにあります。tsup が `src/cli.ts` と依存をまとめて 1 つの `dist/cli.js` にし、npm パッケージが配るのはそれだけです。

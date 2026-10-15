@@ -810,7 +810,17 @@ Limitations above).
 ```sh
 npm install
 npm test        # node:test; the suite never touches your real config or state
+npm run archstrict        # module boundaries and the layer order in archstrict.config.ts
+npm run build && npm run test:scenarios   # the nukadoko scenario in features/, against dist/cli.js
 ```
+
+`npm run test:scenarios` runs the switch this tool exists for as a
+[nukadoko](https://github.com/meganemura/nukadoko) scenario: two
+worktrees served on their own ports, the proxy on the fixed port, and
+`portful use` moving the next request from one to the other. It runs the
+built `dist/cli.js` with scratch config and state directories. CI runs the
+type check, the tests, `archstrict`, the build, and the scenario on Node 24
+and 26.
 
 From a checkout the CLI runs the TypeScript in `src/` directly via tsx,
 so an edit takes effect without a build. `npm run build` exists for
