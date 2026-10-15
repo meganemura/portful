@@ -1,11 +1,12 @@
 # Runs the typecheck, the tests, the module-boundary check, and the nukadoko
-# scenario on every push to main and queue, and on pull requests.
+# scenario on every push to main and queue, on pull requests, and on demand.
 name: CI
 
 on:
   push:
     branches: [main, queue]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
