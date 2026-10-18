@@ -1,10 +1,11 @@
 // Runs the built CLI, the file npm installs as `portful`, with XDG config and
 // state directories of the scenario's own, so the person's repos and state
 // are never read.
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { request } from "node:http";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
+import { runCommand } from "nukadoko";
 
 const CLI = fileURLToPath(new URL("../../dist/cli.js", import.meta.url));
 
@@ -17,10 +18,9 @@ function env(home: PortfulHome): NodeJS.ProcessEnv {
   return { ...process.env, XDG_CONFIG_HOME: home.configHome, XDG_STATE_HOME: home.stateHome };
 }
 
-export function runPortful(args: string[], home: PortfulHome): { exitCode: number; stdout: string; stderr: string } {
-  const result = spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", env: env(home) });
-  if (result.error) throw result.error;
-  return { exitCode: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+export async function runPortful(args: string[], home: PortfulHome): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const result = await runCommand(process.execPath, [CLI, ...args], { env: env(home) });
+  return { exitCode: result.exitCode ?? 1, stdout: result.stdout, stderr: result.stderr };
 }
 
 // For the foreground commands (serve, proxy start): the caller keeps the

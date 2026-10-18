@@ -21,6 +21,9 @@ async function recordedPort(stateHome: string, repo: string, worktree: string): 
   }
 }
 
+// serve runs in the foreground, one per worktree, as the README's quick start
+// does in separate tabs. The two serves start one after the other so they
+// never race for the same port.
 export default defineStep({
   description: "Starts `portful serve api/<worktree>` for both worktrees, then waits until each worktree's own port answers.",
   pattern: "portful serves {first:string} and {second:string}, each on its own port",
@@ -28,7 +31,6 @@ export default defineStep({
   returns: z.object({ ports: z.array(z.number().int()).describe("the port portful gave each worktree, in order") }),
   from: { configHome: [registerRepository, "configHome"], stateHome: [registerRepository, "stateHome"], repo: [registerRepository, "repo"] },
   mutates: true,
-  rationale: "serve runs in the foreground, one per worktree, as the README's quick start does in separate tabs. The two serves start one after the other so they never race for the same port.",
   async run({ processes }, { first, second, configHome, stateHome, repo }) {
     const home = { configHome, stateHome };
     const ports: number[] = [];

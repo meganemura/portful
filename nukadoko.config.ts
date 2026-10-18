@@ -1,15 +1,6 @@
 import { defineConfig, defineFixtures } from "nukadoko";
 import type { ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-
-// Scratch directories a step can write into freely, removed after the
-// scenario whether it passed or failed.
-export interface Scratch {
-  dir(prefix: string): string;
-}
 
 // Long-running portful processes (serve, proxy start) a step started. They
 // run in the foreground by design, so the scenario owns stopping them.
@@ -18,17 +9,6 @@ export interface Processes {
 }
 
 const fixtures = defineFixtures({
-  scratch: async ({}, use) => {
-    const dirs: string[] = [];
-    await use({
-      dir(prefix: string): string {
-        const dir = mkdtempSync(join(tmpdir(), `${prefix}-`));
-        dirs.push(dir);
-        return dir;
-      },
-    });
-    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
-  },
   processes: async ({}, use) => {
     const children: ChildProcess[] = [];
     await use<Processes>({ keep: (child) => void children.push(child) });
@@ -44,7 +24,6 @@ const fixtures = defineFixtures({
 
 declare module "nukadoko" {
   interface StepFixtures {
-    scratch: Scratch;
     processes: Processes;
   }
 }
