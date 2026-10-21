@@ -1,0 +1,140 @@
+# Publishes the npm package when a push to main changes package.json to a
+# version that has no v<version> tag yet, then creates that tag and the GitHub
+# release. portful@0.1.0 was published by hand before this workflow existed;
+# npm can attach a Trusted Publisher because the package already exists.
+# Boundary: the publish job checks out the pushed commit, builds dist/, runs
+# the release checks, and npm publish. The GitHub Environment `publish`
+# approves that job. npm authenticates with that environment's OIDC token. This
+# file never reads NPM_TOKEN. The release job runs only after publish succeeds. It is the only
+# job with contents:write, so that token never sits on a job that can write
+# repository contents. It checks out the commit the publish job checked out.
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  # A push to main that changes package.json releases its version when no
+  # v<version> tag exists yet. Any other change to package.json, such as a
+  # dependency bump, finds the tag and releases nothing.
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the version and look for its tag
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${version}" >/dev/null 2>&1; then
+            echo "v${version} already exists, so this push releases nothing"
+          else
+            echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: check
+    if: needs.check.outputs.tag != ''
+    runs-on: ubuntu-latest
+    environment: publish
+    outputs:
+      sha: ${{ steps.checkout.outputs.commit }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        id: checkout
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          # A release build installs from the lockfile only. The setup-node
+          # package cache is a write path from other workflows.
+          package-manager-cache: false
+
+      - name: Require Node 24 and npm 11.5.1
+        run: |
+          node --version
+          npm --version
+          node <<'EOF'
+          const [nodeMajor] = process.versions.node.split(".").map(Number);
+          if (nodeMajor !== 24) {
+            console.error(`Node ${process.versions.node} is not Node 24`);
+            process.exit(1);
+          }
+          const {execSync} = require("node:child_process");
+          const [major, minor, patch] = execSync("npm --version", {encoding: "utf8"})
+            .trim()
+            .split(".")
+            .map(Number);
+          if (!(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1))))) {
+            console.error(`npm ${major}.${minor}.${patch} is older than 11.5.1`);
+            process.exit(1);
+          }
+          EOF
+
+      - run: npm ci
+      - run: npm run build
+      - name: Refuse unexpected changes to tracked files
+        run: |
+          # The package publishes compiled dist/, and dist/ is gitignored, so
+          # the build is expected to add untracked output. Refuse only
+          # modifications of files git already tracks. Do not treat a new
+          # dist/ as a dirty release tree.
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            git status --porcelain --untracked-files=no
+            exit 1
+          fi
+      - run: npm run type-check
+      - run: npm run archstrict
+      - run: npm test
+      - run: npm publish
+
+  # Runs only after npm publish succeeds. A separate job keeps contents:write
+  # away from the job that holds the npm OIDC token.
+  release:
+    needs: [check, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The publish job may wait on the environment for a long time, and
+          # main may move meanwhile. Check out the commit it actually published.
+          ref: ${{ needs.publish.outputs.sha }}
+
+      - name: Create the GitHub release from this version's changelog section
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+          PUBLISHED_SHA: ${{ github.sha }}
+        run: |
+          version="${TAG#v}"
+          # --notes-file CHANGELOG.md would carry every version, so extract only this one.
+          awk -v v="$version" '$0 ~ "^## " v " " {in_version=1; next} /^## /{in_version=0} in_version' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no section for ${version}" >&2
+            exit 1
+          fi
+          # A re-run must not fail on a release that already exists.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists"
+            exit 0
+          fi
+          # The tag does not exist yet: this call creates it on the published commit.
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md --target "$PUBLISHED_SHA"
