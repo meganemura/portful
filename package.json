@@ -1,6 +1,6 @@
 {
   "name": "portful",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Keep one fixed port pointed at whichever git worktree is active, and switch it without restarting the client",
   "type": "module",
   "license": "MIT",
