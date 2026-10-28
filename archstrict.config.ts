@@ -25,6 +25,7 @@ export default {
     "test/**",
     "features/**",
     "nukadoko.config.ts",
+    "nukadoko.program.ts",
   ],
   // src/ is mostly flat, so most files are their own module and every import
   // between two of them is checked. commands/ and ui/ are directory modules.
